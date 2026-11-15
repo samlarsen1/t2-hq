@@ -251,7 +251,25 @@ with their source), the expected effect, the main risk, and a confidence level.
   report. On the first start it marks what's already there as seen.
 - **Conversation history:** the last six question-and-answer pairs per chat, without tool calls.
 - **Not yet:** missed-session detection (the `status` tool shows each timer's last and next run,
-  so gaps are visible on request) and opening pull requests (step 5).
+  so gaps are visible on request).
+
+### As built (step 5, `t2-hq` 0.2.0)
+
+- **Button, not tool.** Each suggestion in the digest has 📝 Open PR, ✅ Accept and ❌ Reject.
+  Pushing to GitHub is an outward action, so only the button (or `t2-hq open-pr <id>`) starts
+  it; the agent has no `open_config_pr` tool.
+- **Code writes the change** (`configedit.py`): small line edits that keep comments and layout,
+  then a check that the parsed file differs from the original by exactly the intended change,
+  and that the current value is still what the suggestion saw. Removing a market's last stock
+  writes `tickers: []`.
+- **Its own clones** under `var/repos/`, reset to the latest `main` each time. The branch is
+  `task/3po-<id>`, which the droid repos' branch-name rule accepts; a second press finds the
+  existing pull request.
+- **Checks run in CI**, on the pull request, rather than locally before pushing: the droid's
+  own workflow runs its tests and linters, and nothing changes until the operator merges and
+  redeploys.
+- After opening the pull request, the suggestion is recorded as accepted in t2-3po, with the
+  pull request's URL as the note.
 
 One long-running service with three parts.
 
@@ -354,7 +372,7 @@ Droids depend on it by git tag. Do this last: it touches all four repos and chan
    from the command line before the orchestrator exists. *(done: `t2-3po` 0.3.0)*
 4. **Orchestrator, read-only.** `t2-hq` with the LLM toggle, Telegram questions and answers,
    `status`, `last_report`, `dry_run`, and the advice digest. *(done: `t2-hq` 0.1.0)*
-5. **Suggestion to pull request.**
+5. **Suggestion to pull request.** *(done: `t2-hq` 0.2.0)*
 6. **Shared library.**
 
 ### Rolling out step 2
@@ -382,7 +400,5 @@ Each droid's 0.2.0 must be merged, released and deployed. Per host:
   stay local.
 - **Free models only.** `t2-3po` and the orchestrator run on Gemini's free tier or Ollama.
 
-Still open:
-
-1. When the operator accepts a suggestion in Telegram, should `t2-hq` open a pull request
-   (Part 5), or only report and leave the edit to the operator? The plan assumes a pull request.
+- **An accepted suggestion can become a pull request** at the press of a button; accepting
+  without one is still possible.

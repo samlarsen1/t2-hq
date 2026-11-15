@@ -16,6 +16,7 @@ from .config import Settings
 from .digest import advice_messages
 from .droids import Droids
 from .llm import build_model
+from .prs import PullRequestError, PullRequests
 from .service import Ask, Orchestrator, format_status
 from .store import Store
 from .telegram import Telegram
@@ -49,6 +50,24 @@ def _asker(settings: Settings, droids: Droids) -> Ask:
     return ask
 
 
+def _pull_requests(settings: Settings, droids: Droids) -> PullRequests:
+    token = settings.github_token.get_secret_value() if settings.github_token else None
+    return PullRequests(
+        droids, settings.state_dir / "repos", github_token=token, gh=settings.gh_path
+    )
+
+
+async def _open_pr(settings: Settings, suggestion_id: str) -> int:
+    droids = _droids(settings)
+    try:
+        pr = await _pull_requests(settings, droids).open(suggestion_id)
+    except PullRequestError as exc:
+        print(f"Couldn't open a pull request: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    print(pr.url if pr.created else f"Already open: {pr.url}")
+    return EXIT_OK
+
+
 async def _serve(settings: Settings) -> int:
     if settings.telegram_bot_token is None or settings.telegram_chat_id is None:
         print("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set", file=sys.stderr)
@@ -69,6 +88,7 @@ async def _serve(settings: Settings) -> int:
         ask,
         poll_seconds=settings.telegram_poll_seconds,
         watch_seconds=settings.watch_seconds,
+        pull_requests=_pull_requests(settings, droids),
     )
     logger.info("t2hq_started apps_dir=%s", settings.apps_dir.resolve())
     try:
@@ -121,6 +141,10 @@ def _parser() -> argparse.ArgumentParser:
     ask = commands.add_parser("ask", help="Ask the assistant one question and print the answer")
     ask.add_argument("question")
     commands.add_parser("digest", help="Print the latest advice digest as it would be sent")
+    open_pr = commands.add_parser(
+        "open-pr", help="Make a t2-3po suggestion's change in a pull request on the droid's repo"
+    )
+    open_pr.add_argument("suggestion_id")
     return parser
 
 
@@ -138,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_status(settings))
     if args.command == "ask":
         return asyncio.run(_ask(settings, args.question))
+    if args.command == "open-pr":
+        return asyncio.run(_open_pr(settings, args.suggestion_id))
     return _digest(settings)
 
 

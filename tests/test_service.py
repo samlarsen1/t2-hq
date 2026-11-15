@@ -11,6 +11,7 @@ from pydantic_ai.messages import ModelMessage
 from conftest import ADVICE, report
 from t2hq.digest import advice_messages, failure_alert, parse_callback
 from t2hq.droids import Droids
+from t2hq.prs import PullRequest, PullRequestError
 from t2hq.service import Orchestrator
 from t2hq.store import HISTORY_EXCHANGES, Store
 from t2hq.telegram import Buttons, Update
@@ -157,7 +158,10 @@ async def test_watch_sends_new_advice_once_and_alerts_on_failures(
     texts = [message for message, _ in bot.sent]
     assert texts[0].startswith("T2-3PO strategy advice, 2026-11-22: 1 suggestion(s).")
     assert texts[1].startswith("1. Move TSLA from moderate to mild")
-    assert bot.sent[1][1] == [[("✅ Accept", "acc:e3a79f4f"), ("❌ Reject", "rej:e3a79f4f")]]
+    assert bot.sent[1][1] == [
+        [("📝 Open PR", "pr:e3a79f4f")],
+        [("✅ Accept", "acc:e3a79f4f"), ("❌ Reject", "rej:e3a79f4f")],
+    ]
     assert texts[2].startswith("⚠️ t2-d2 session eu_morning: failed")
     assert len(texts) == 3
 
@@ -173,8 +177,9 @@ def test_digest_and_alert_formatting() -> None:
     alert = failure_alert(json.loads(report("t2-k2", "17", "failed", "API down")))
     assert alert.startswith("⚠️ t2-k2 harvest: failed at 2026-11-17T08:31 UTC")
     assert "Errors: HTTPStatusError" in alert
-    assert parse_callback("acc:abc") == (True, "abc")
-    assert parse_callback("rej:abc") == (False, "abc")
+    assert parse_callback("acc:abc") == ("acc", "abc")
+    assert parse_callback("rej:abc") == ("rej", "abc")
+    assert parse_callback("pr:abc") == ("pr", "abc")
     assert parse_callback("noop") is None and parse_callback("buy:abc") is None
 
 
@@ -187,3 +192,48 @@ def test_store_offset_and_seen(tmp_path: Path) -> None:
     assert store.mark_seen("advice", "a") is True
     assert store.mark_seen("advice", "a") is False
     assert store.is_seen("advice", "a") and not store.is_seen("report", "a")
+
+
+class FakePullRequests:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.opened: list[str] = []
+
+    async def open(self, suggestion_id: str) -> PullRequest:
+        if self.fail:
+            raise PullRequestError("the config has changed")
+        self.opened.append(suggestion_id)
+        return PullRequest("https://github.com/owner/t2-d2/pull/31", created=True)
+
+
+async def test_open_pr_button(setup: tuple[Orchestrator, FakeBot, list[str]], apps: Path) -> None:
+    orchestrator, bot, _ = setup
+    press = Update(
+        update_id=1, chat_id=CHAT, message_id=5, callback_id="cb", callback_data="pr:e3a79f4f"
+    )
+
+    await orchestrator.handle(press)
+    assert bot.answers == ["Pull requests aren't set up"]
+
+    fake = FakePullRequests()
+    orchestrator.pull_requests = fake  # type: ignore[assignment]
+    await orchestrator.handle(press)
+    assert fake.opened == ["e3a79f4f"]
+    assert bot.answers[-1] == "Opening a pull request..."
+    assert bot.sent[-1][0].startswith("Opened https://github.com/owner/t2-d2/pull/31")
+    assert bot.buttons[-1] == [[("PR opened ✓", "noop")]]
+    log = (apps / "t2-3po/.venv/bin/calls.log").read_text()
+    assert (
+        "suggestions accept e3a79f4f --note pull request https://github.com/owner/t2-d2/pull/31"
+        in log
+    )
+
+    orchestrator.pull_requests = FakePullRequests(fail=True)  # type: ignore[assignment]
+    await orchestrator.handle(press)
+    assert bot.sent[-1][0] == "Couldn't open a pull request for e3a79f4f: the config has changed"
+
+    bad = Update(
+        update_id=2, chat_id=CHAT, message_id=6, callback_id="cb", callback_data="pr:../../x"
+    )
+    await orchestrator.handle(bad)
+    assert bot.answers[-1] == "Not a suggestion id"

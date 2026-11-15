@@ -10,8 +10,9 @@ from typing import Any, Protocol
 
 from pydantic_ai.messages import ModelMessage
 
-from .digest import advice_messages, failure_alert, parse_callback
-from .droids import DROIDS, DroidError, Droids
+from .digest import ACCEPT, OPEN_PR, advice_messages, failure_alert, parse_callback
+from .droids import DROIDS, SUGGESTION_ID, DroidError, Droids
+from .prs import PullRequestError, PullRequests
 from .store import Store
 from .telegram import Buttons, TelegramError, Update
 
@@ -71,6 +72,7 @@ class Orchestrator:
         ask: Ask,
         poll_seconds: int = 50,
         watch_seconds: int = 60,
+        pull_requests: PullRequests | None = None,
     ) -> None:
         self.bot = bot
         self.chat_id = chat_id
@@ -79,6 +81,7 @@ class Orchestrator:
         self.ask = ask
         self.poll_seconds = poll_seconds
         self.watch_seconds = watch_seconds
+        self.pull_requests = pull_requests
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def run_forever(self) -> None:
@@ -145,7 +148,11 @@ class Orchestrator:
         if parsed is None:
             await self.bot.answer_callback(update.callback_id, "Unknown button")
             return
-        accept, suggestion_id = parsed
+        action, suggestion_id = parsed
+        if action == OPEN_PR:
+            await self.open_pull_request(update, suggestion_id)
+            return
+        accept = action == ACCEPT
         try:
             result = await self.droids.decide(suggestion_id, accept, "via Telegram")
         except DroidError as exc:
@@ -159,6 +166,35 @@ class Orchestrator:
         await self.bot.answer_callback(update.callback_id, f"{word} {suggestion_id}")
         if update.message_id is not None:
             await self.bot.set_buttons(self.chat_id, update.message_id, [[(f"{word} ✓", "noop")]])
+
+    async def open_pull_request(self, update: Update, suggestion_id: str) -> None:
+        """Make the suggested change in a pull request, then record the suggestion as accepted."""
+        assert update.callback_id is not None
+        if self.pull_requests is None:
+            await self.bot.answer_callback(update.callback_id, "Pull requests aren't set up")
+            return
+        if not SUGGESTION_ID.match(suggestion_id):
+            await self.bot.answer_callback(update.callback_id, "Not a suggestion id")
+            return
+        await self.bot.answer_callback(update.callback_id, "Opening a pull request...")
+        try:
+            pr = await self.pull_requests.open(suggestion_id)
+        except PullRequestError as exc:
+            await self.bot.send(
+                self.chat_id, f"Couldn't open a pull request for {suggestion_id}: {exc}"
+            )
+            return
+        note = f"pull request {pr.url}"
+        result = await self.droids.decide(suggestion_id, True, note)
+        recorded = "" if result.returncode == 0 else " (couldn't record it in t2-3po)"
+        verb = "Opened" if pr.created else "Already open:"
+        await self.bot.send(
+            self.chat_id,
+            f"{verb} {pr.url}\nReview and merge it, then redeploy. "
+            f"Suggestion {suggestion_id} is marked accepted{recorded}.",
+        )
+        if update.message_id is not None:
+            await self.bot.set_buttons(self.chat_id, update.message_id, [[("PR opened ✓", "noop")]])
 
     async def _safe_send(self, text: str, buttons: Buttons | None = None) -> None:
         try:

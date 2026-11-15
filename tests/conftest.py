@@ -6,6 +6,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -80,7 +81,7 @@ def report(droid: str, stamp: str, status: str = "ok", summary: str = "fine") ->
     )
 
 
-ADVICE = {
+ADVICE: dict[str, Any] = {
     "created_at": "2026-11-22T08:05:00Z",
     "droids": ["t2-d2", "t2-k2"],
     "no_change": "Everything else stays.",

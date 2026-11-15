@@ -53,8 +53,12 @@ place, change or cancel an order.
   `last_report`, `recent_runs`, `show_config`, `dry_run` and `suggestions`.
 - **Commands:** `/status` (versions, last runs, next timers), `/advice` (open suggestions),
   `/reset` (forget the conversation), `/help`.
-- **It tells you** when t2-3po's weekly advice is ready, one message per suggestion with
-  ✅ Accept / ❌ Reject buttons that record your answer in t2-3po, and when any droid run fails.
+- **It tells you** when t2-3po's weekly advice is ready, one message per suggestion, and when any
+  droid run fails. Each suggestion has three buttons:
+  - **📝 Open PR:** t2-hq makes the change in a pull request on the droid's repository, for you
+    to review and merge, and records the suggestion as accepted.
+  - **✅ Accept:** you've made the change yourself.
+  - **❌ Reject:** it isn't suggested again for 90 days.
 - **Dry runs can't trade.** Code builds the command (never `--execute` or `--no-dry-run`), turns
   the droid's Telegram messages off, and keeps the dry run's report out of the droid's history.
 - **Only one chat is answered:** `TELEGRAM_CHAT_ID`. Everything else is ignored.
@@ -78,6 +82,26 @@ journalctl --user -u t2-hq.service -f      # its log
 systemctl --user restart t2-hq.service     # after editing .env
 ```
 
+### Pull requests for accepted suggestions
+
+When you press 📝 Open PR, code (not the model) makes the change:
+
+1. It reads the stored suggestion from t2-3po's advice and works in its own clone of the droid's
+   repository under `var/repos/`, reset to the latest `main`. Your development checkouts are
+   never touched.
+2. It edits the YAML in place, changing only the lines involved, so comments and layout stay. It
+   then parses the file before and after and refuses unless the only difference is the intended
+   change, and unless the current value is still what the suggestion saw.
+3. It commits on `task/3po-<id>`, pushes, and opens the pull request with `gh`. The droid's CI
+   runs on it. A second press links to the same pull request.
+
+After you merge, release and deploy the droid as usual. The agent has no tool for this: only the
+button, or `t2-hq open-pr <id>` on the command line, opens a pull request.
+
+`gh` must be signed in for the service's user (`gh auth status`), or set `GITHUB_TOKEN` in
+`.env` to a fine-grained token limited to the `t2-*` repositories, with contents and pull
+requests write access.
+
 ### Without Telegram
 
 ```bash
@@ -85,6 +109,7 @@ uv sync
 uv run t2-hq status                        # what /status sends
 uv run t2-hq digest                        # the latest advice, as it would be sent
 uv run t2-hq ask "how did k2's last run go?"
+uv run t2-hq open-pr e3a79f4f              # a suggestion's change, as a pull request
 ```
 
 Set `APPS_DIR` to the deployed apps directory when running from a development checkout.
@@ -124,7 +149,7 @@ uv run mypy
 
 ## Status
 
-Steps 1 to 4 of [PLAN.md](PLAN.md) are done: the repos are linked, every droid follows the
-contract, `bin/t2-deploy` deploys them, `t2-3po advise` suggests configuration changes, and the
-read-only orchestrator connects it all to Telegram. Next is step 5: turning an accepted suggestion
-into a pull request.
+Steps 1 to 5 of [PLAN.md](PLAN.md) are done: the repos are linked, every droid follows the
+contract, `bin/t2-deploy` deploys them, `t2-3po advise` suggests configuration changes, the
+orchestrator connects it all to Telegram, and an accepted suggestion becomes a pull request. Next
+is step 6, the shared `t2-core` library.
