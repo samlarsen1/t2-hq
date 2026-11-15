@@ -12,7 +12,7 @@ through Telegram, that reports on the droids and passes on strategy advice from 
 | `t2-k2` | harvests gains from overbought holdings | places sell orders | weekly timer |
 | `t2-bb8` | harvests the Trading212 instrument list | metadata only | weekly timer |
 | `t2-3po` | advisory council: reviews theses, strategy and configuration | read-only | weekly timer |
-| **t2-hq** (this repo) | plan, architecture, and later the orchestrator and Telegram interface | none | long-running service (planned) |
+| **t2-hq** (this repo) | plan, contract, deploy tool, and the orchestrator: a read-only Telegram assistant | none | long-running service |
 
 All five repos live under the same GitHub owner. Clone them side by side:
 
@@ -42,6 +42,53 @@ bin/t2-contract check                # every droid's t2contract.py matches contr
 
 Run `bin/t2-deploy` with no arguments for the full usage.
 
+## The orchestrator
+
+`t2-hq run` is a long-running service, deployed like the droids, that connects them to the operator
+through a Telegram bot. It is **read-only**: it holds no Trading212 key, and no tool it has can
+place, change or cancel an order.
+
+- **Ask it anything** in the bot's chat: "what did d2 do today?", "show k2's thresholds",
+  "dry-run d2's eu_morning session". A PydanticAI agent answers using read-only tools: `status`,
+  `last_report`, `recent_runs`, `show_config`, `dry_run` and `suggestions`.
+- **Commands:** `/status` (versions, last runs, next timers), `/advice` (open suggestions),
+  `/reset` (forget the conversation), `/help`.
+- **It tells you** when t2-3po's weekly advice is ready, one message per suggestion with
+  ✅ Accept / ❌ Reject buttons that record your answer in t2-3po, and when any droid run fails.
+- **Dry runs can't trade.** Code builds the command (never `--execute` or `--no-dry-run`), turns
+  the droid's Telegram messages off, and keeps the dry run's report out of the droid's history.
+- **Only one chat is answered:** `TELEGRAM_CHAT_ID`. Everything else is ignored.
+- **Model:** Gemini's free tier by default (paced and retried), or Ollama
+  (`MODEL_PROVIDER=ollama`), optionally as a fallback (`OLLAMA_FALLBACK=true`).
+
+Only one process may poll a Telegram bot. t2-d2 only *sends* with the same bot, which is fine;
+don't run a second poller.
+
+### Setting it up
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) (or reuse t2-d2's) and find your chat ID.
+2. Write `$T2_APPS/t2-hq/.env` from [`.env.example`](.env.example): `TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_CHAT_ID` and `GOOGLE_API_KEY`.
+3. `bin/t2-deploy deploy t2-hq`. It installs `t2-hq.service` as a user service, which restarts on
+   failure and starts at boot (with lingering on).
+4. Send `/status` to the bot.
+
+```bash
+journalctl --user -u t2-hq.service -f      # its log
+systemctl --user restart t2-hq.service     # after editing .env
+```
+
+### Without Telegram
+
+```bash
+uv sync
+uv run t2-hq status                        # what /status sends
+uv run t2-hq digest                        # the latest advice, as it would be sent
+uv run t2-hq ask "how did k2's last run go?"
+```
+
+Set `APPS_DIR` to the deployed apps directory when running from a development checkout.
+
 ## How the pieces relate
 
 - **Each droid stands alone.** It runs from its own systemd timer with its own `.env` and
@@ -66,8 +113,18 @@ $T2_APPS/    deployments: one folder per droid, side by side         (for exampl
 Each deployed droid has its own `.env`, written by the operator from that repo's `.env.example`.
 No script or agent in this system creates, reads or edits a `.env` file.
 
+## Development
+
+```bash
+uv sync
+uv run pytest            # tests, including the contract module's
+uv run ruff check . && uv run ruff format --check src tests
+uv run mypy
+```
+
 ## Status
 
-Steps 1 to 3 of [PLAN.md](PLAN.md) are done: the repos are linked, every droid follows the
-contract, `bin/t2-deploy` deploys them, and `t2-3po advise` suggests configuration changes. Next is
-step 4, the read-only orchestrator.
+Steps 1 to 4 of [PLAN.md](PLAN.md) are done: the repos are linked, every droid follows the
+contract, `bin/t2-deploy` deploys them, `t2-3po advise` suggests configuration changes, and the
+read-only orchestrator connects it all to Telegram. Next is step 5: turning an accepted suggestion
+into a pull request.

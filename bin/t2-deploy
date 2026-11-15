@@ -9,7 +9,7 @@
 #
 # Apps: the droids t2-d2 t2-k2 t2-bb8 t2-3po, and t2-hq itself (the orchestrator service).
 #
-# Settings come from the environment or ~/.config/t2/deploy.conf (shell syntax):
+# Settings come from the environment or, failing that, ~/.config/t2/deploy.conf (shell syntax):
 #   T2_SRC    development checkouts (default: the directory holding this t2-hq checkout)
 #   T2_APPS   deployed apps (required for deploy, undeploy and status)
 # For tests: T2_UNIT_DIR (default ~/.config/systemd/user) and T2_SYSTEMCTL (default systemctl).
@@ -19,8 +19,14 @@ set -euo pipefail
 
 HQ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/t2/deploy.conf"
+# The environment wins over the config file, so a one-off override (or a test) can't be undone
+# by it.
+env_src="${T2_SRC-}"
+env_apps="${T2_APPS-}"
 # shellcheck source=/dev/null
 [[ -f "$CONF" ]] && source "$CONF"
+[[ -n "$env_src" ]] && T2_SRC="$env_src"
+[[ -n "$env_apps" ]] && T2_APPS="$env_apps"
 T2_SRC="${T2_SRC:-$(dirname "$HQ")}"
 UNIT_DIR="${T2_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 SYSTEMCTL="${T2_SYSTEMCTL:-systemctl}"

@@ -1,7 +1,12 @@
 # T2-HQ
 
 Hub repo for the T2 droid system: the plan ([PLAN.md](PLAN.md)), the architecture
-([ARCHITECTURE.md](ARCHITECTURE.md)) and, later, the PydanticAI orchestrator and Telegram interface.
+([ARCHITECTURE.md](ARCHITECTURE.md)), the droid contract ([CONTRACT.md](CONTRACT.md)), the deploy
+tool (`bin/t2-deploy`) and the orchestrator: uv project (Python 3.12), `src/t2hq`, command `t2-hq`.
+
+```bash
+uv run pytest && uv run ruff check . && uv run mypy      # before every commit
+```
 
 ## Sibling repos
 
@@ -15,6 +20,12 @@ directory:
 
 ## Rules
 
+- **The orchestrator is read-only.** Every agent tool is in `agent.py` and only reads, or runs a
+  dry run through `Droids.dry_run`, which builds the command in code and refuses
+  `FORBIDDEN_ARGS`. Never add a tool, command or button that trades, edits a droid's files, or
+  passes text from the model into a command line.
+- **Never log or raise the Telegram token.** It is in every Bot API URL, so `telegram.py` errors
+  carry no URL or request, and the `httpx` loggers stay at WARNING.
 - **The orchestrator never places orders** and holds no Trading212 key. Trading stays in
   `t2-d2` and `t2-k2`, driven by their own timers and YAML configuration.
 - **Advice is never applied automatically.** `t2-3po` suggestions reach the operator through
