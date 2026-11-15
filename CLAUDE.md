@@ -5,7 +5,8 @@ Hub repo for the T2 droid system: the plan ([PLAN.md](PLAN.md)), the architectur
 
 ## Sibling repos
 
-Checked out side by side under `~/dev/git/samlarsen1/t2/`, deployed side by side under `~/dev/apps/`:
+Checked out side by side in one development directory, and deployed side by side in one apps
+directory:
 
 - `../t2-d2`: dip buyer (places buys)
 - `../t2-k2`: gain harvester (places sells)
@@ -16,9 +17,11 @@ Checked out side by side under `~/dev/git/samlarsen1/t2/`, deployed side by side
 
 - **The orchestrator never places orders** and holds no Trading212 key. Trading stays in
   `t2-d2` and `t2-k2`, driven by their own timers and YAML configuration.
-- **Advice is never applied automatically.** `t2-3po` suggestions reach Sam through Telegram;
-  a configuration change lands only as a pull request that Sam merges.
+- **Advice is never applied automatically.** `t2-3po` suggestions reach the operator through
+  Telegram; a configuration change lands only as a pull request that the operator merges.
 - **Never create, read, edit, copy or link `.env` files.** Only write `.env.example` with placeholders.
+- **Keep the documents generic.** No personal names, machine names, home-directory paths or
+  secrets-file locations; use `$T2_SRC` and `$T2_APPS` for the two directories.
 - **Droids are called as subprocesses**, never imported. Read their JSON run reports.
 - **Keep the documents current.** A change to how the droids interact updates `ARCHITECTURE.md`
   and `PLAN.md` in the same commit. A change to the droid contract is made here first.

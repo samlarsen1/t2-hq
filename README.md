@@ -8,16 +8,23 @@ through Telegram, that reports on the droids and passes on strategy advice from 
 
 | Repo | Role | Trading212 access | Runs |
 |---|---|---|---|
-| [t2-d2](https://github.com/samlarsen1/t2-d2) | buys dips (DCA) across UK, US and EU stocks | places buy orders | six systemd timers, weekdays |
-| [t2-k2](https://github.com/samlarsen1/t2-k2) | harvests gains from overbought holdings | places sell orders | weekly (not yet deployed) |
-| [t2-bb8](https://github.com/samlarsen1/t2-bb8) | harvests the Trading212 instrument list | metadata only | weekly (not yet deployed) |
-| [t2-3po](https://github.com/samlarsen1/t2-3po) | advisory council: reviews theses, strategy and configuration | read-only | weekly (not yet deployed) |
-| **t2-hq** (this repo) | plan, architecture, and later the orchestrator and Telegram interface | none | long-running service (not yet built) |
+| `t2-d2` | buys dips (DCA) across UK, US and EU stocks | places buy orders | systemd timers, one per trading session |
+| `t2-k2` | harvests gains from overbought holdings | places sell orders | weekly timer |
+| `t2-bb8` | harvests the Trading212 instrument list | metadata only | weekly timer |
+| `t2-3po` | advisory council: reviews theses, strategy and configuration | read-only | weekly timer |
+| **t2-hq** (this repo) | plan, architecture, and later the orchestrator and Telegram interface | none | long-running service (planned) |
+
+All five repos live under the same GitHub owner. Clone them side by side:
+
+```bash
+mkdir -p "$T2_SRC" && cd "$T2_SRC"
+for repo in t2-hq t2-d2 t2-k2 t2-bb8 t2-3po; do git clone "git@github.com:<owner>/$repo.git"; done
+```
 
 ## Documents
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): diagrams of how the pieces fit together.
-- [PLAN.md](PLAN.md): the work to get there, in order, with the decisions made so far.
+- [PLAN.md](PLAN.md): the design, the work to get there in order, and the decisions made so far.
 
 ## How the pieces relate
 
@@ -26,18 +33,22 @@ through Telegram, that reports on the droids and passes on strategy advice from 
 - **`t2-d2` and `t2-k2` trade on their own.** They follow the rules in their YAML configuration.
   No LLM and no Telegram approval sits in the order path.
 - **`t2-3po` advises.** It reads the other droids' configuration and run reports and suggests
-  changes, such as moving a stock from `mild` to `moderate` or adding a holding. Sam decides.
-- **`t2-hq` connects them to Sam.** It runs droids as subprocesses, reads their reports, and
-  talks to Sam through Telegram. It never places an order.
+  changes, such as moving a stock from `mild` to `moderate` or adding a holding. The operator
+  decides.
+- **`t2-hq` connects them to the operator.** It runs droids as subprocesses, reads their reports,
+  and talks to the operator through Telegram. It never places an order.
 
 ## Layout on disk
 
+Two directories, chosen per installation:
+
 ```
-~/dev/git/samlarsen1/t2/     development: one git repo per droid, plus this one
-~/dev/apps/                  deployments: one folder per droid, each with its own .env
+$T2_SRC/     development: one git checkout per repo, side by side   (for example ~/src/t2)
+$T2_APPS/    deployments: one folder per droid, side by side         (for example ~/apps/t2)
 ```
 
-`.env` files are managed by hand. No script or agent in this system creates, reads or edits one.
+Each deployed droid has its own `.env`, written by the operator from that repo's `.env.example`.
+No script or agent in this system creates, reads or edits a `.env` file.
 
 ## Status
 

@@ -7,7 +7,7 @@ How the T2 droids fit together. Solid boxes exist today; items marked *planned* 
 
 ```mermaid
 flowchart TB
-    sam(["Sam"])
+    op(["Operator"])
     tg["Telegram bot"]
 
     subgraph hq["t2-hq: orchestrator (planned)"]
@@ -27,11 +27,11 @@ flowchart TB
 
     bb8["t2-bb8<br/>instrument harvester"]
 
-    timers[["systemd timers<br/>(Chromebook)"]]
+    timers[["systemd timers<br/>(host machine)"]]
     t212[("Trading212 API")]
     yahoo[("Yahoo Finance")]
 
-    sam <-->|"questions, answers"| tg
+    op <-->|"questions, answers"| tg
     tg <-->|"long polling"| agent
 
     agent -->|"runs as subprocess"| c3po
@@ -60,7 +60,8 @@ flowchart TB
 Three things to read from this:
 
 - **Orders have one path:** timer → droid → Trading212. The orchestrator and the LLM aren't on it.
-- **Advice has one path:** `t2-3po` → `t2-hq` → Telegram → Sam. Nothing changes until Sam acts.
+- **Advice has one path:** `t2-3po` → `t2-hq` → Telegram → the operator. Nothing changes until
+  the operator acts.
 - **The timers don't depend on the orchestrator.** If `t2-hq` or the LLM is down, trading continues.
 
 ## The advice loop
@@ -74,7 +75,7 @@ sequenceDiagram
     participant C as t2-3po
     participant R as droid repos<br/>(config, run reports)
     participant H as t2-hq
-    participant S as Sam (Telegram)
+    participant S as Operator (Telegram)
     participant G as GitHub
 
     T->>C: weekly strategy review
@@ -92,7 +93,7 @@ sequenceDiagram
 
 | Component | Trading212 | Writes to | LLM | Schedule |
 |---|---|---|---|---|
-| `t2-d2` | portfolio, place buys | its own logs and reports | none | six sessions, weekdays |
+| `t2-d2` | portfolio, place buys | its own logs and reports | none | one timer per trading session, weekdays |
 | `t2-k2` | portfolio, place and cancel its own sells | its own reports | none | weekly |
 | `t2-bb8` | instrument metadata, at most one harvest per 20 hours | its data folder (local only, not in git) | none | weekly |
 | `t2-3po` | GET only | its reports and suggestions | Gemini Flash (free tier) or Ollama | weekly |
@@ -102,15 +103,15 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    subgraph dev["~/dev/git/samlarsen1/t2 (development)"]
+    subgraph dev["$T2_SRC (development)"]
         r1["t2-hq"]
         r2["t2-d2"]
         r3["t2-k2"]
         r4["t2-bb8"]
         r5["t2-3po"]
     end
-    gh[("GitHub<br/>samlarsen1/t2-*")]
-    subgraph apps["~/dev/apps (deployed, tag-pinned)"]
+    gh[("GitHub<br/>t2-* repos")]
+    subgraph apps["$T2_APPS (deployed, tag-pinned)"]
         a1["t2-hq"]
         a2["t2-d2"]
         a3["t2-k2"]
@@ -119,7 +120,7 @@ flowchart LR
     end
     dev -->|"push, tag"| gh
     gh -->|"just deploy"| apps
-    env["each app's .env<br/>managed by Sam only"] -.-> apps
+    env["each app's .env<br/>written by the operator"] -.-> apps
 ```
 
 Deployed apps sit side by side, so `t2-3po` reads `../t2-d2/config/` and `../t2-k2/config/`: the
