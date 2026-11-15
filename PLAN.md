@@ -26,7 +26,7 @@ Diagrams are in [ARCHITECTURE.md](ARCHITECTURE.md).
 | `t2-bb8` | instrument harvester | metadata only | `apps/t2-bb8` is empty: not deployed |
 | `t2-d2` | dip buyer, 6 sessions | places buys | **deployed and scheduled**; the dev repo is on `feature/sma200-uptrend-gate`, 2 commits ahead of the deployed `main` |
 | `t2-k2` | gain harvester | places sells (`--execute`) | `apps/t2-k2` holds only an `.env` link: not deployed |
-| `t2-3po` | advisory council | read-only (GET only) | not deployed; on `feature/initial-build`; already uses PydanticAI with an Anthropic/Ollama toggle |
+| `t2-3po` | advisory council | read-only (GET only) | not deployed; on `feature/initial-build`; PydanticAI with a Gemini (free tier) / Ollama toggle (`feature/free-models`) |
 | `t2-hq` | hub and orchestrator | none | this repo; documents only |
 
 Things that matter for the design:
@@ -44,8 +44,11 @@ Things that matter for the design:
   `t2bb8/client.py`, `t2_3po/t212.py`) and three Yahoo data modules. Telegram is send-only and
   lives inside `t2-d2`'s scheduler.
 - **Only `t2-k2` writes a machine-readable report** (`--report`). `t2-d2` and `t2-bb8` only log.
-- **`t2-bb8` commits its harvested data to git**, which would make a deployed checkout dirty on
-  every run.
+- **Only code and configuration go to GitHub.** `t2-bb8`'s harvested data is gitignored
+  (`feature/conservative-harvest`); `t2-d2`'s price cache, `t2-k2`'s reports and `t2-3po`'s
+  reports and proposals already were. Deployed apps write their data under `var/`.
+- **`t2-bb8` is conservative with the shared key** (`feature/conservative-harvest`): at most one
+  harvest per 20 hours, retries never inside an endpoint's window, three attempts at most.
 - **`t2-3po` reads `../t2-d2/config/stocks.yaml` by relative path.** That works in both the dev
   and the apps layout as long as the two sit side by side.
 - Python versions differ: `t2-3po` allows 3.11, the others need 3.12.
@@ -93,7 +96,8 @@ Every droid meets the same contract, so timers, the orchestrator and `t2-3po` tr
   - `t2-d2`: add a report built from `RunResult`; add a `t2d2` console script so it runs the same
     way as the others.
   - `t2-bb8`: `manifest.json` is close; add the run report and move output to `var/data` when
-    deployed (`--data-dir`). Decide whether the dev repo keeps committing data.
+    deployed (`--data-dir`). Its exit code 3 currently means an
+    API error and a recent-harvest skip exits 0, so align its codes with this contract.
   - `t2-3po`: reports and proposals already go to folders; add the run report and a JSON form of
     each proposal and suggestion.
 - **Stable, documented exit codes:** 0 success, 1 run failed, 2 bad config or usage, 3 skipped
@@ -215,8 +219,8 @@ One long-running service with three parts.
 
 ### LLM toggle
 
-- Reuse the shape of `t2-3po`'s `build_model(settings)` and add a Google provider:
-  `MODEL_PROVIDER=google|ollama` (and `anthropic`, which `t2-3po` already supports).
+- Reuse `t2-3po`'s `build_model(settings)`, which already has `MODEL_PROVIDER=google|ollama`, free-tier
+  pacing (`PacedModel`) and retry with backoff. No paid provider anywhere in the system.
 - Use a fallback chain so a rate-limited Gemini call falls back to Ollama.
 - **What to expect from Ollama on this machine:** with 6.3 GB RAM and no GPU, only a model of
   about 4B parameters fits. It will be slow and unreliable at calling tools. Use Gemini Flash for
@@ -323,12 +327,12 @@ Made by Sam on 2026-11-15:
 - **No Telegram approval is needed to place orders.** The droids trade on their own rules.
 - **`t2-3po` reviews strategy and configuration** across the other repos and advises changes.
 - **The hub repo is `t2-hq`.**
+- **`t2-bb8` keeps harvesting**, conservatively, so the shared key isn't rate limited.
+- **Only configuration goes to GitHub.** Harvested data, caches, reports and proposals stay local.
+- **`t2-3po` doesn't use Claude.** It runs on Gemini's free tier or Ollama, like the orchestrator.
 
 Still open:
 
 1. When Sam accepts a suggestion in Telegram, should `t2-hq` open a pull request (Part 5), or
    only report and leave the edit to Sam? The plan assumes a pull request.
-2. Should `t2-bb8` keep committing harvested data to git in the dev repo?
-3. Does `t2-3po`'s council stay on Claude, or move to the Gemini/Ollama toggle too? Strategy
-   advice is the place where model quality matters most.
-4. Is `t2-hq` public like the other repos? It was created private.
+2. Is `t2-hq` public like the other repos? It was created private.
