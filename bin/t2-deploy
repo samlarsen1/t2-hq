@@ -7,9 +7,9 @@
 #   t2-deploy undeploy <droid>          stop and remove the droid's units (keeps .env and var/)
 #   t2-deploy status                    deployed versions, timers and each droid's last run
 #
-# Droids: t2-d2 t2-k2 t2-bb8 t2-3po.
+# Apps: the droids t2-d2 t2-k2 t2-bb8 t2-3po, and t2-hq itself (the orchestrator service).
 #
-# Settings come from the environment or ~/.config/t2/deploy.conf (shell syntax):
+# Settings come from the environment or, failing that, ~/.config/t2/deploy.conf (shell syntax):
 #   T2_SRC    development checkouts (default: the directory holding this t2-hq checkout)
 #   T2_APPS   deployed apps (required for deploy, undeploy and status)
 # For tests: T2_UNIT_DIR (default ~/.config/systemd/user) and T2_SYSTEMCTL (default systemctl).
@@ -19,12 +19,18 @@ set -euo pipefail
 
 HQ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/t2/deploy.conf"
+# The environment wins over the config file, so a one-off override (or a test) can't be undone
+# by it.
+env_src="${T2_SRC-}"
+env_apps="${T2_APPS-}"
 # shellcheck source=/dev/null
 [[ -f "$CONF" ]] && source "$CONF"
+[[ -n "$env_src" ]] && T2_SRC="$env_src"
+[[ -n "$env_apps" ]] && T2_APPS="$env_apps"
 T2_SRC="${T2_SRC:-$(dirname "$HQ")}"
 UNIT_DIR="${T2_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 SYSTEMCTL="${T2_SYSTEMCTL:-systemctl}"
-DROIDS=(t2-d2 t2-k2 t2-bb8 t2-3po)
+DROIDS=(t2-d2 t2-k2 t2-bb8 t2-3po t2-hq)
 CLEANUP=()
 trap 'rm -rf "${CLEANUP[@]}"' EXIT
 
@@ -45,7 +51,7 @@ known_droid() {
 # Unit name prefix for a droid: t2-d2 -> t2d2, t2-3po stays t2-3po.
 unit_prefix() {
   case "$1" in
-    t2-3po) echo "t2-3po" ;;
+    t2-3po | t2-hq) echo "$1" ;;
     *) echo "${1//-/}" ;;
   esac
 }
@@ -130,6 +136,15 @@ check_no_system_units() {
   fi
 }
 
+# Stop a unit that is being removed: timers and long-running services only. A one-shot droid
+# service that is running right now (a trading session, say) is left to finish.
+stop_unit() {
+  local unit="$1"
+  if [[ "$unit" == *.timer ]] || grep -q '^\[Install\]' "$UNIT_DIR/$unit" 2>/dev/null; then
+    $SYSTEMCTL --user disable --now "$unit" >/dev/null 2>&1 || true
+  fi
+}
+
 installed_units() {
   local prefix="$1"
   [[ -d "$UNIT_DIR" ]] || return 0
@@ -202,7 +217,7 @@ cmd_deploy() {
   while read -r unit; do
     [[ -n "$unit" && ! -e "$tmp/$unit" ]] || continue
     info "removing stale unit $unit"
-    [[ "$unit" == *.timer ]] && $SYSTEMCTL --user disable --now "$unit" >/dev/null 2>&1 || true
+    stop_unit "$unit"
     rm -f "$UNIT_DIR/$unit"
   done < <(installed_units "$prefix")
 
@@ -214,6 +229,14 @@ cmd_deploy() {
     timer="$(basename "$timer")"
     $SYSTEMCTL --user enable -q "$timer"
     $SYSTEMCTL --user restart "$timer"
+  done
+  # Long-running services (those with an [Install] section) start now and at boot.
+  local service
+  for service in "$tmp"/*.service; do
+    [[ -e "$service" ]] && grep -q '^\[Install\]' "$service" || continue
+    service="$(basename "$service")"
+    $SYSTEMCTL --user enable -q "$service"
+    $SYSTEMCTL --user restart "$service"
   done
 
   if command -v loginctl >/dev/null \
@@ -230,7 +253,7 @@ cmd_undeploy() {
   prefix="$(unit_prefix "$droid")"
   while read -r unit; do
     [[ -n "$unit" ]] || continue
-    [[ "$unit" == *.timer ]] && { $SYSTEMCTL --user disable --now "$unit" >/dev/null 2>&1 || true; }
+    stop_unit "$unit"
     rm -f "$UNIT_DIR/$unit"
     info "removed $unit"
   done < <(installed_units "$prefix")

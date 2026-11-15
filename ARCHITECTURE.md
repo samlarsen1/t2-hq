@@ -1,7 +1,6 @@
 # Architecture
 
-How the T2 droids fit together. Solid boxes exist today; items marked *planned* are described in
-[PLAN.md](PLAN.md).
+How the T2 droids fit together. Everything shown exists; [PLAN.md](PLAN.md) has the next steps.
 
 ## System overview
 
@@ -10,7 +9,7 @@ flowchart TB
     op(["Operator"])
     tg["Telegram bot"]
 
-    subgraph hq["t2-hq: orchestrator (planned)"]
+    subgraph hq["t2-hq: orchestrator (read-only)"]
         agent["PydanticAI agent<br/>status, reports, dry runs, advice"]
         llm{{"LLM toggle<br/>Gemini Flash / Ollama"}}
         agent --- llm

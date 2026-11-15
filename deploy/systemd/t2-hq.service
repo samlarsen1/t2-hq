@@ -1,0 +1,17 @@
+# Installed by bin/t2-deploy, which replaces @APP_DIR@ with the deployed app directory.
+[Unit]
+Description=T2-HQ orchestrator: Telegram assistant and droid watcher (read-only)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@APP_DIR@
+ExecStart=@APP_DIR@/.venv/bin/t2-hq run
+Restart=on-failure
+RestartSec=30
+# A configuration error (exit 2) won't fix itself by restarting.
+RestartPreventExitStatus=2
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,55 @@
+[project]
+name = "t2-hq"
+version = "0.1.0"
+description = "Orchestrator for the T2 droids: Telegram, status, dry runs and strategy advice"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.10",
+    "pydantic-ai-slim[google,openai]>=2.61",
+    "pydantic-settings>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+t2-hq = "t2hq.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/t2hq"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.10",
+    "pip-audit>=2.9",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "types-PyYAML>=6.0",
+]
+
+[tool.uv]
+# Supply-chain cooldown, matching the droids: ignore versions published in the last 7 days
+exclude-newer = "7 days"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "contract"]
+asyncio_mode = "auto"

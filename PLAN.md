@@ -35,7 +35,7 @@ chat and every `.env` file.
 | `t2-k2` | gain harvester | places sells (`--execute`) | working; weekly timer described in its README |
 | `t2-bb8` | instrument harvester | metadata only | working; conservative with the rate limits |
 | `t2-3po` | advisory council | read-only (GET only) | `evaluate`, `review` and `advise` work; runs on Gemini's free tier or Ollama |
-| `t2-hq` | hub and orchestrator | none | the contract (`CONTRACT.md`), `bin/t2-deploy` and `bin/t2-contract`; no orchestrator yet |
+| `t2-hq` | hub and orchestrator | none | the contract (`CONTRACT.md`), `bin/t2-deploy`, `bin/t2-contract`, and the read-only orchestrator (`t2-hq run`, 0.1.0) |
 
 Things that matter for the design:
 
@@ -230,7 +230,28 @@ with their source), the expected effect, the main risk, and a confidence level.
 - A suggestion rejected in the last 90 days, or already accepted, is dropped; an open one is
   marked as a repeat. At most five survive, highest confidence first.
 
-## Part 5: the orchestrator (`t2-hq`)
+## Part 5: the orchestrator (`t2-hq`) *(read-only part done in 0.1.0)*
+
+### As built (step 4)
+
+- **Service:** `t2-hq run`, a systemd user service (`Restart=on-failure`) deployed by
+  `bin/t2-deploy`, which now also enables and restarts long-running services. It reads the
+  droids from the sibling app directories (`APPS_DIR`, default `..`).
+- **Telegram:** plain Bot API calls over `httpx` with long polling; no bot library. Commands
+  `/status`, `/advice`, `/reset`, `/help`; anything else goes to the agent. Each update is handled
+  in its own task, so a slow dry run doesn't block polling.
+- **Agent tools:** `status`, `last_report`, `recent_runs`, `show_config`, `dry_run`,
+  `suggestions`. `harvest_instruments`, `review_*` and `advise` aren't tools: those runs are long
+  and scheduled weekly, and the agent can read their reports. `ask_user` isn't a tool either: the
+  agent asks in its reply, and code-driven questions (the advice digest) use buttons.
+- **Dry runs** set `T2_RUNS_DIR` to a temporary directory, so they don't count as real activity
+  in t2-3po's advice, and switch the droid's Telegram off.
+- **Watcher:** every minute, sends a new advice run as a digest with Accept/Reject buttons (which
+  call `t2-3po suggestions accept|reject`) and alerts on any `failed` or `config_error` run
+  report. On the first start it marks what's already there as seen.
+- **Conversation history:** the last six question-and-answer pairs per chat, without tool calls.
+- **Not yet:** missed-session detection (the `status` tool shows each timer's last and next run,
+  so gaps are visible on request) and opening pull requests (step 5).
 
 One long-running service with three parts.
 
@@ -332,7 +353,7 @@ Droids depend on it by git tag. Do this last: it touches all four repos and chan
 3. **`t2-3po advise`.** Config readers, suggestion models, validation, the new command. Usable
    from the command line before the orchestrator exists. *(done: `t2-3po` 0.3.0)*
 4. **Orchestrator, read-only.** `t2-hq` with the LLM toggle, Telegram questions and answers,
-   `status`, `last_report`, `dry_run`, and the advice digest.
+   `status`, `last_report`, `dry_run`, and the advice digest. *(done: `t2-hq` 0.1.0)*
 5. **Suggestion to pull request.**
 6. **Shared library.**
 
