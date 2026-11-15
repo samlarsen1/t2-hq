@@ -17,7 +17,7 @@ flowchart TB
     end
 
     subgraph advisory["Advisory layer: read-only"]
-        c3po["t2-3po<br/>thesis, strategy and config review"]
+        c3po["t2-3po<br/>thesis, strategy and config review<br/>Gemini Flash / Ollama"]
     end
 
     subgraph exec["Execution layer: trades by rule, no LLM"]
@@ -94,8 +94,8 @@ sequenceDiagram
 |---|---|---|---|---|
 | `t2-d2` | portfolio, place buys | its own logs and reports | none | six sessions, weekdays |
 | `t2-k2` | portfolio, place and cancel its own sells | its own reports | none | weekly |
-| `t2-bb8` | instrument metadata | its data folder | none | weekly |
-| `t2-3po` | GET only | its reports and suggestions | council (provider set in its `.env`) | weekly |
+| `t2-bb8` | instrument metadata, at most one harvest per 20 hours | its data folder (committed in the dev repo) | none | weekly |
+| `t2-3po` | GET only | its reports and suggestions | Gemini Flash (free tier) or Ollama | weekly |
 | `t2-hq` | none | pull requests, Telegram, its own state | Gemini Flash or Ollama | always on |
 
 ## Where things live
