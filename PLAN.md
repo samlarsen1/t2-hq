@@ -34,7 +34,7 @@ chat and every `.env` file.
 | `t2-d2` | dip buyer, one run per trading session | places buys | working; scheduled with systemd timers (see its `install.md`) |
 | `t2-k2` | gain harvester | places sells (`--execute`) | working; weekly timer described in its README |
 | `t2-bb8` | instrument harvester | metadata only | working; conservative with the rate limits |
-| `t2-3po` | advisory council | read-only (GET only) | `evaluate` and `review` work; runs on Gemini's free tier or Ollama |
+| `t2-3po` | advisory council | read-only (GET only) | `evaluate`, `review` and `advise` work; runs on Gemini's free tier or Ollama |
 | `t2-hq` | hub and orchestrator | none | the contract (`CONTRACT.md`), `bin/t2-deploy` and `bin/t2-contract`; no orchestrator yet |
 
 Things that matter for the design:
@@ -147,7 +147,7 @@ systemd user timers on the host that runs the apps. Each repo ships its units un
   sessions and `t2-k2`'s harvest don't: firing late would trade on stale prices.
 - Timers use each market's time zone.
 
-## Part 4: `t2-3po` as strategy and configuration advisor
+## Part 4: `t2-3po` as strategy and configuration advisor *(done in 0.3.0)*
 
 `t2-3po` evaluates a thesis (`evaluate`) and profiles each stock in `t2-d2`'s list against a macro
 thesis (`review`). The new work adds a third job: review how the other droids are *configured*
@@ -202,10 +202,33 @@ with their source), the expected effect, the main risk, and a confidence level.
   doesn't repeat a rejected idea every week and can later be judged against what happened.
 - `t2-3po` writes suggestions and reports. It never edits another repo's files.
 
-### New command
+### Commands
 
-`t2-3po advise [--only d2|k2] [--dry-run]` writes `var/suggestions/<date>.json` and a markdown
-report. It reuses the existing council (Bull, Bear, Quantitative Analyst, Protocol Officer).
+- `t2-3po advise [--only d2|k2] [--no-portfolio] [--dry-run]` writes
+  `var/suggestions/<date>_advice.json` and `reports/<date>_advice.md`. It runs weekly from
+  `t2-3po-advise.timer`, Sunday 08:00, after the review.
+- `t2-3po suggestions [--all]` lists suggestions; `t2-3po suggestions accept|reject <id> --note`
+  records the operator's answer in `var/suggestions/decisions.json`. Ids are stable, so the same
+  change suggested again keeps its id. `t2-hq` will call the same commands (Part 5).
+
+### As built
+
+- **Two agents, not the full council.** A Strategy Analyst drafts up to eight suggestions and a
+  Risk Reviewer challenges each one. That's two model calls per run instead of four, which suits
+  Gemini's free tier; the council stays for `evaluate`.
+- **New holdings aren't picked from a code-built shortlist.** The analyst names a symbol and a
+  market; code then requires exactly one tradable `t2-bb8` instrument in that market, a year of
+  Yahoo prices, and that the stock isn't already listed. A ticker outside `t2-bb8`'s list is
+  still impossible.
+- **"Dip days by mode"** is the main evidence for mode changes: how often each mode's daily
+  (and weekly) price rule would have fired in the last year. It ignores the RSI, trend and cash
+  checks, so real buys are rarer, and the prompt says so.
+- **Adjustable settings are an allow-list** in `t2-3po`'s `configs.py`: dip, position, cash and
+  weight limits per t2-d2 mode, and t2-k2's overbought and harvest thresholds. A change keeps its
+  sign and moves at most 50% per step. Order types, schedules and global limits are out of scope.
+- **Privacy:** the model sees position weights, never account values.
+- A suggestion rejected in the last 90 days, or already accepted, is dropped; an open one is
+  marked as a repeat. At most five survive, highest confidence first.
 
 ## Part 5: the orchestrator (`t2-hq`)
 
@@ -307,7 +330,7 @@ Droids depend on it by git tag. Do this last: it touches all four repos and chan
 2. **Contract and deploy.** JSON reports, exit codes and locks in each droid; `bin/t2-deploy`;
    systemd units; align on Python 3.12. *(done; see "Rolling out step 2" below)*
 3. **`t2-3po advise`.** Config readers, suggestion models, validation, the new command. Usable
-   from the command line before the orchestrator exists.
+   from the command line before the orchestrator exists. *(done: `t2-3po` 0.3.0)*
 4. **Orchestrator, read-only.** `t2-hq` with the LLM toggle, Telegram questions and answers,
    `status`, `last_report`, `dry_run`, and the advice digest.
 5. **Suggestion to pull request.**
