@@ -1,0 +1,26 @@
+# T2-HQ
+
+Hub repo for the T2 droid system: the plan ([PLAN.md](PLAN.md)), the architecture
+([ARCHITECTURE.md](ARCHITECTURE.md)) and, later, the PydanticAI orchestrator and Telegram interface.
+
+## Sibling repos
+
+Checked out side by side under `~/dev/git/samlarsen1/t2/`, deployed side by side under `~/dev/apps/`:
+
+- `../t2-d2`: dip buyer (places buys)
+- `../t2-k2`: gain harvester (places sells)
+- `../t2-bb8`: instrument harvester (metadata only)
+- `../t2-3po`: advisory council (read-only)
+
+## Rules
+
+- **The orchestrator never places orders** and holds no Trading212 key. Trading stays in
+  `t2-d2` and `t2-k2`, driven by their own timers and YAML configuration.
+- **Advice is never applied automatically.** `t2-3po` suggestions reach Sam through Telegram;
+  a configuration change lands only as a pull request that Sam merges.
+- **Never create, read, edit, copy or link `.env` files.** Only write `.env.example` with placeholders.
+- **Droids are called as subprocesses**, never imported. Read their JSON run reports.
+- **Keep the documents current.** A change to how the droids interact updates `ARCHITECTURE.md`
+  and `PLAN.md` in the same commit. A change to the droid contract is made here first.
+- Git: commit only on `feature/<name>`, `bug/<name>`, `task/<name>` or `hotfix/<name>` branches;
+  never directly on `main`.
