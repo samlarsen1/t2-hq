@@ -44,8 +44,9 @@ Things that matter for the design:
   `t2bb8/client.py`, `t2_3po/t212.py`) and three Yahoo data modules. Telegram is send-only and
   lives inside `t2-d2`'s scheduler.
 - **Only `t2-k2` writes a machine-readable report** (`--report`). `t2-d2` and `t2-bb8` only log.
-- **`t2-bb8` commits its harvested data to git**, and keeps doing so. A deployed checkout must
-  therefore write to `var/data` (`--data-dir`) so the checkout stays clean.
+- **Only code and configuration go to GitHub.** `t2-bb8`'s harvested data is gitignored
+  (`feature/conservative-harvest`); `t2-d2`'s price cache, `t2-k2`'s reports and `t2-3po`'s
+  reports and proposals already were. Deployed apps write their data under `var/`.
 - **`t2-bb8` is conservative with the shared key** (`feature/conservative-harvest`): at most one
   harvest per 20 hours, retries never inside an endpoint's window, three attempts at most.
 - **`t2-3po` reads `../t2-d2/config/stocks.yaml` by relative path.** That works in both the dev
@@ -95,7 +96,7 @@ Every droid meets the same contract, so timers, the orchestrator and `t2-3po` tr
   - `t2-d2`: add a report built from `RunResult`; add a `t2d2` console script so it runs the same
     way as the others.
   - `t2-bb8`: `manifest.json` is close; add the run report and move output to `var/data` when
-    deployed (`--data-dir`). The dev repo keeps committing data. Its exit code 3 currently means an
+    deployed (`--data-dir`). Its exit code 3 currently means an
     API error and a recent-harvest skip exits 0, so align its codes with this contract.
   - `t2-3po`: reports and proposals already go to folders; add the run report and a JSON form of
     each proposal and suggestion.
@@ -326,12 +327,12 @@ Made by Sam on 2026-11-15:
 - **No Telegram approval is needed to place orders.** The droids trade on their own rules.
 - **`t2-3po` reviews strategy and configuration** across the other repos and advises changes.
 - **The hub repo is `t2-hq`.**
-- **`t2-bb8` keeps harvesting into git**, conservatively, so the shared key isn't rate limited.
+- **`t2-bb8` keeps harvesting**, conservatively, so the shared key isn't rate limited.
+- **Only configuration goes to GitHub.** Harvested data, caches, reports and proposals stay local.
 - **`t2-3po` doesn't use Claude.** It runs on Gemini's free tier or Ollama, like the orchestrator.
 
 Still open:
 
 1. When Sam accepts a suggestion in Telegram, should `t2-hq` open a pull request (Part 5), or
    only report and leave the edit to Sam? The plan assumes a pull request.
-2. Should `t2-bb8` keep committing harvested data to git in the dev repo?
-3. Is `t2-hq` public like the other repos? It was created private.
+2. Is `t2-hq` public like the other repos? It was created private.

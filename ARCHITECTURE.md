@@ -94,7 +94,7 @@ sequenceDiagram
 |---|---|---|---|---|
 | `t2-d2` | portfolio, place buys | its own logs and reports | none | six sessions, weekdays |
 | `t2-k2` | portfolio, place and cancel its own sells | its own reports | none | weekly |
-| `t2-bb8` | instrument metadata, at most one harvest per 20 hours | its data folder (committed in the dev repo) | none | weekly |
+| `t2-bb8` | instrument metadata, at most one harvest per 20 hours | its data folder (local only, not in git) | none | weekly |
 | `t2-3po` | GET only | its reports and suggestions | Gemini Flash (free tier) or Ollama | weekly |
 | `t2-hq` | none | pull requests, Telegram, its own state | Gemini Flash or Ollama | always on |
 
