@@ -36,4 +36,9 @@ class Settings(BaseSettings):
     watch_seconds: int = Field(default=60, ge=5)
     dry_run_timeout_seconds: int = Field(default=900, ge=10)
 
+    # Pull requests for accepted suggestions use the gh CLI. Without a token, gh's own login is
+    # used; a token here should be limited to the t2-* repos (contents and pull requests).
+    github_token: SecretStr | None = None
+    gh_path: str = "gh"
+
     log_level: str = "INFO"

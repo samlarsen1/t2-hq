@@ -24,6 +24,10 @@ directory:
   dry run through `Droids.dry_run`, which builds the command in code and refuses
   `FORBIDDEN_ARGS`. Never add a tool, command or button that trades, edits a droid's files, or
   passes text from the model into a command line.
+- **Pull requests are code-written and operator-started.** `prs.py` applies a stored suggestion
+  through `configedit.py`, whose every edit is verified against the parsed YAML. Only the
+  Open PR button or `t2-hq open-pr` starts it: never give the agent a tool that pushes or opens
+  pull requests, and never let model output reach a file or a git command.
 - **Never log or raise the Telegram token.** It is in every Bot API URL, so `telegram.py` errors
   carry no URL or request, and the `httpx` loggers stay at WARNING.
 - **The orchestrator never places orders** and holds no Trading212 key. Trading stays in

@@ -12,6 +12,7 @@ from .telegram import Buttons
 
 ACCEPT = "acc"
 REJECT = "rej"
+OPEN_PR = "pr"
 
 
 def advice_messages(run: dict[str, Any]) -> list[tuple[str, Buttons | None]]:
@@ -41,11 +42,13 @@ def advice_messages(run: dict[str, Any]) -> list[tuple[str, Buttons | None]]:
             + f"Effect: {s.get('expected_effect')}\n"
             f"Risk: {s.get('risk')}\n"
             f"Reviewer: {s.get('reviewer_note')}\n\n"
-            f"Accept once you've made the change, or reject so it isn't suggested again. "
+            f"Open PR: t2-hq makes the change in a pull request for you to review. "
+            f"Accept: you've made it yourself. Reject: it isn't suggested again. "
             f"Id {s.get('id')}"
         )
         buttons: Buttons = [
-            [("✅ Accept", f"{ACCEPT}:{s.get('id')}"), ("❌ Reject", f"{REJECT}:{s.get('id')}")]
+            [("📝 Open PR", f"{OPEN_PR}:{s.get('id')}")],
+            [("✅ Accept", f"{ACCEPT}:{s.get('id')}"), ("❌ Reject", f"{REJECT}:{s.get('id')}")],
         ]
         messages.append((text, buttons))
     return messages
@@ -74,11 +77,11 @@ def failure_alert(report: dict[str, Any]) -> str:
     )
 
 
-def parse_callback(data: str | None) -> tuple[bool, str] | None:
-    """(accept, suggestion id) from a button's data, or None if it isn't an advice button."""
+def parse_callback(data: str | None) -> tuple[str, str] | None:
+    """(action, suggestion id) from an advice button's data, or None for any other button."""
     if not data or ":" not in data:
         return None
     action, _, suggestion_id = data.partition(":")
-    if action not in (ACCEPT, REJECT):
+    if action not in (ACCEPT, REJECT, OPEN_PR):
         return None
-    return action == ACCEPT, suggestion_id
+    return action, suggestion_id
