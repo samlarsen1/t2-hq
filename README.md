@@ -68,5 +68,6 @@ No script or agent in this system creates, reads or edits a `.env` file.
 
 ## Status
 
-Steps 1 and 2 of [PLAN.md](PLAN.md) are done: the repos are linked, every droid follows the
-contract, and `bin/t2-deploy` deploys them. Next is step 3, `t2-3po advise`.
+Steps 1 to 3 of [PLAN.md](PLAN.md) are done: the repos are linked, every droid follows the
+contract, `bin/t2-deploy` deploys them, and `t2-3po advise` suggests configuration changes. Next is
+step 4, the read-only orchestrator.
