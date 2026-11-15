@@ -35,21 +35,22 @@ chat and every `.env` file.
 | `t2-k2` | gain harvester | places sells (`--execute`) | working; weekly timer described in its README |
 | `t2-bb8` | instrument harvester | metadata only | working; conservative with the rate limits |
 | `t2-3po` | advisory council | read-only (GET only) | `evaluate` and `review` work; runs on Gemini's free tier or Ollama |
-| `t2-hq` | hub and orchestrator | none | documents only |
+| `t2-hq` | hub and orchestrator | none | the contract (`CONTRACT.md`), `bin/t2-deploy` and `bin/t2-contract`; no orchestrator yet |
 
 Things that matter for the design:
 
 - **Code is duplicated.** There are four Trading212 clients (`t2d2-client`, `t2k2/client.py`,
   `t2bb8/client.py`, `t2_3po/t212.py`) and three Yahoo data modules. Telegram is send-only and
   lives inside `t2-d2`'s scheduler.
-- **Only `t2-k2` writes a machine-readable report** (`--report`). `t2-d2` and `t2-bb8` only log.
+- **Every droid follows the contract** in [CONTRACT.md](CONTRACT.md) (version 0.2.0 of each droid):
+  a JSON run report per run, exit codes 0/1/2/3, a run lock, and the shared Trading212 lock.
 - **Only code and configuration go to GitHub.** Harvested data, price caches, reports and
   proposals are gitignored in every repo. Deployed apps write them under `var/`.
 - **`t2-bb8` is conservative with the API key:** at most one harvest per 20 hours, retries never
   inside an endpoint's rate-limit window, three attempts at most.
 - **`t2-3po` reads `../t2-d2/config/stocks.yaml` by relative path.** That works in both
   `$T2_SRC` and `$T2_APPS` as long as the repos sit side by side.
-- Python versions differ: `t2-3po` allows 3.11, the others need 3.12.
+- All droids need Python 3.12.
 
 ## Principles
 
@@ -82,72 +83,68 @@ $T2_APPS/                         deployments (tagged releases, never edited by 
 
 Every repo's README and `CLAUDE.md` link to `t2-hq`, and `t2-hq` lists each of them.
 
-## Part 1: droid contract
+## Part 1: droid contract *(done)*
 
 Every droid meets the same contract, so timers, the orchestrator and `t2-3po` treat them alike.
+The rules are in [CONTRACT.md](CONTRACT.md); in short:
 
-- **Dry run by default.** Already true for `t2-d2` and `t2-k2`; `t2-bb8` and `t2-3po` don't trade.
-- **JSON run report.** Each run writes `var/runs/<UTC timestamp>-<command>.json` with: droid,
-  version, command, start and end time, dry-run flag, exit status, and a result section (decisions,
-  orders, skips with reasons, errors). A `--report PATH` flag overrides the location.
-  - `t2-k2`: has `--report`; add the default location and the common header fields.
-  - `t2-d2`: add a report built from `RunResult`; add a `t2d2` console script so it runs the same
-    way as the others.
-  - `t2-bb8`: `manifest.json` is close; add the run report and write to `var/data` when deployed
-    (`--data-dir`). Its exit code 3 currently means an API error and a recent-harvest skip exits
-    0, so align its codes with this contract.
-  - `t2-3po`: reports and proposals already go to folders; add the run report and a JSON form of
-    each proposal and suggestion.
-- **Stable, documented exit codes:** 0 success, 1 run failed, 2 bad config or usage, 3 skipped
-  (blackout day, lock held).
-- **One run at a time per droid**, with a lock file. A second start exits with code 3.
-- **A shared Trading212 lock.** Rate limits are per account, so droids on independent timers can
-  collide and get HTTP 429 responses. All Trading212 calls take a file lock at a shared path
-  (`$T2_APPS/.t212.lock`) and honour the documented per-endpoint spacing.
-- **Shared report models.** The pydantic models for run reports live in one place so the
-  orchestrator and `t2-3po` parse exactly what the droids write. They start in `t2-hq` and move
-  to `t2-core`.
+- **Dry run by default** for the droids that trade (`t2-d2`, `t2-k2`).
+- **A JSON run report per run** in `var/runs/`, in the shape of
+  [`contract/run-report.schema.json`](contract/run-report.schema.json), including runs that fail,
+  skip or crash.
+- **Exit codes:** 0 ok, 1 failed, 2 configuration or usage error, 3 skipped.
+- **One run at a time per droid**, and **a shared Trading212 account lock** so droids on
+  independent timers don't trip the per-account rate limits. `t2-d2`'s Tuesday 22:00 session and
+  `t2-k2`'s weekly harvest, for example, now take turns.
+- **One implementation.** [`contract/t2contract.py`](contract/t2contract.py) is the reference,
+  vendored unchanged into each droid; `bin/t2-contract check` catches drift. It moves to `t2-core`
+  in Part 7.
 
-## Part 2: deployment
+## Part 2: deployment *(done)*
 
 A deployed app is a git checkout of a release tag in `$T2_APPS`, with its own virtual
-environment. Each repo gets a `justfile` with:
+environment. One tool in this repo, [`bin/t2-deploy`](bin/t2-deploy), deploys every droid, rather
+than a copy of the same script in each repo:
 
-- `just check`: the repo's existing tests and linters.
-- `just release vX.Y.Z`: only from a clean `main`; tags and pushes.
-- `just deploy [tag]`:
-  1. clone into `$T2_APPS/<name>` if absent, otherwise `git fetch --tags`;
-  2. check out the tag (detached), refusing if the app checkout has local changes;
+- `t2-deploy check <droid>`: the droid's tests.
+- `t2-deploy release <droid> vX.Y.Z`: only from a clean `main` that matches `origin/main`, with
+  the project version equal to the tag and the tests passing; tags and pushes the tag.
+- `t2-deploy deploy <droid> [tag]` (default: the newest tag):
+  1. refuses if the droid already has system units, so it can never be scheduled twice;
+  2. checks out the tag (detached) in `$T2_APPS/<droid>`, refusing if the checkout has local
+     changes; an existing folder without git (holding only `.env`) is fine;
   3. `uv sync --frozen --no-dev`;
-  4. create `var/` if missing;
-  5. install or refresh the systemd units and reload;
-  6. print the deployed version and the next timer runs.
-- `just undeploy`: disable the units. It leaves `.env` and `var/` alone.
+  4. creates `var/`;
+  5. stops if `.env` is missing, before installing anything;
+  6. renders the droid's units from `deploy/systemd/`, removes units the new version no longer has,
+     installs them as systemd **user** units, and enables the timers;
+  7. prints the deployed version and the next runs, and warns if lingering is off.
+- `t2-deploy undeploy <droid>`: disables and removes the units; leaves `.env` and `var/` alone.
+- `t2-deploy status`: deployed versions, each droid's last run, and all `t2*` timers.
 
-The deploy script never creates, reads or edits `.env`. If `.env` is missing it says so and stops
-before enabling timers.
+The deploy never creates, reads or edits `.env`.
 
-## Part 3: scheduling
+## Part 3: scheduling *(done)*
 
-systemd timers on the host that runs the apps. Each repo ships its unit files under
+systemd user timers on the host that runs the apps. Each repo ships its units under
 `deploy/systemd/`.
 
-| Droid | Schedule | Notes |
-|---|---|---|
-| `t2-d2` | one timer per session in `config/schedules.yaml` | generated from the schedule file; see its `install.md` |
-| `t2-k2` | weekly, Tuesday 22:00 Europe/London | dry run unless the unit passes `--execute` |
-| `t2-bb8` | weekly, outside market hours | refreshes the instrument list |
-| `t2-3po` | weekly strategy review, after `t2-bb8` | rate-limited model calls; keep it infrequent |
-| `t2-hq` | long-running service | `Restart=on-failure` |
+| Droid | Schedule | Persistent | Notes |
+|---|---|---|---|
+| `t2-d2` | one timer per enabled session in `config/schedules.yaml` | no | rendered by `deploy/systemd/render.py`; `DRY_RUN` in `.env` decides live or dry |
+| `t2-k2` | Tuesday 22:00 Europe/London | no | **dry run** unless the operator adds `--execute` in a drop-in (see its README) |
+| `t2-bb8` | Sunday 06:00 Europe/London | yes | writes to `var/data` |
+| `t2-3po` | Sunday 07:00 Europe/London, `review` | yes | after `t2-bb8`; paced free-tier model calls |
+| `t2-hq` | long-running service | n/a | `Restart=on-failure` (Part 5) |
 
-- **System units or user units.** `t2-d2`'s `install.md` uses system units installed with
-  `sudo`. User units with lingering enabled (`loginctl enable-linger`) let `just deploy` install
-  them without `sudo`; either works, and the deploy script should support the one the host uses.
+- **User units, not system units.** They install without `sudo` and run while the user is logged
+  out once lingering is on (`loginctl enable-linger`). `t2-d2`'s `install.md` still documents
+  system units for a standalone install; `bin/t2-deploy` refuses to add user units next to them.
 - **Missed runs.** Timers only fire while the host is running and awake; a laptop that sleeps
   will miss sessions. An always-on host such as a Raspberry Pi avoids that. Either way, the
   `status` check in `t2-hq` reports missed sessions, so a gap is visible in Telegram instead of
-  silent. Weekly jobs (`t2-k2`, `t2-bb8`, `t2-3po`) use `Persistent=true` so they run at the next
-  wake-up; the intraday `t2-d2` sessions stay non-persistent.
+  silent. `t2-bb8` and `t2-3po` use `Persistent=true` so they run at the next wake-up. `t2-d2`'s
+  sessions and `t2-k2`'s harvest don't: firing late would trade on stale prices.
 - Timers use each market's time zone.
 
 ## Part 4: `t2-3po` as strategy and configuration advisor
@@ -307,8 +304,8 @@ Droids depend on it by git tag. Do this last: it touches all four repos and chan
 ## Order of work
 
 1. **Link the repos.** Create `t2-hq`; cross-link every README and `CLAUDE.md`. *(done)*
-2. **Contract and deploy.** JSON reports and exit codes in each droid; `justfile` deploy scripts;
-   systemd units; align on Python 3.12.
+2. **Contract and deploy.** JSON reports, exit codes and locks in each droid; `bin/t2-deploy`;
+   systemd units; align on Python 3.12. *(done; see "Rolling out step 2" below)*
 3. **`t2-3po advise`.** Config readers, suggestion models, validation, the new command. Usable
    from the command line before the orchestrator exists.
 4. **Orchestrator, read-only.** `t2-hq` with the LLM toggle, Telegram questions and answers,
@@ -316,9 +313,23 @@ Droids depend on it by git tag. Do this last: it touches all four repos and chan
 5. **Suggestion to pull request.**
 6. **Shared library.**
 
+### Rolling out step 2
+
+Each droid's 0.2.0 must be merged, released and deployed. Per host:
+
+1. Merge each droid's contract branch, then `bin/t2-deploy release <droid> v0.2.0` for each.
+2. Make sure each `$T2_APPS/<droid>/.env` exists (the operator writes it), and that
+   `GOOGLE_API_KEY` or `MODEL_PROVIDER=ollama` is in `t2-3po`'s.
+3. `bin/t2-deploy deploy t2-bb8`, then `t2-k2` (dry run), then `t2-3po`.
+4. `t2-d2` last, and only after removing its system units if it has them (its README,
+   Deployment), ideally outside market hours: `bin/t2-deploy deploy t2-d2`.
+5. `bin/t2-deploy status` to see the timers, then check each droid's first run report.
+
 ## Design decisions
 
-- **Schedules run on one host with systemd timers.** The orchestrator runs on the same host.
+- **Schedules run on one host with systemd user timers**, installed by `bin/t2-deploy`. The
+  orchestrator runs on the same host.
+- **One deploy tool and one contract module in `t2-hq`**, not a copy of each in every droid.
 - **No Telegram approval is needed to place orders.** The droids trade on their own rules.
 - **`t2-3po` reviews strategy and configuration** across the other repos and advises changes.
 - **The hub repo is `t2-hq`.**

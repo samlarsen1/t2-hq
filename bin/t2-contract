@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Keep every droid's vendored copy of contract/t2contract.py identical to the reference.
+#
+#   bin/t2-contract check   exit 1 if any droid's copy differs or is missing
+#   bin/t2-contract sync    copy the reference into every droid checkout
+#
+# Droid checkouts are found next to this repo, or in $T2_SRC.
+set -euo pipefail
+
+HQ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="${T2_SRC:-$(dirname "$HQ")}"
+REF="$HQ/contract/t2contract.py"
+
+# droid -> path of its vendored copy
+declare -A DEST=(
+  [t2-d2]="services/scheduler/src/scheduler/t2contract.py"
+  [t2-k2]="src/t2k2/t2contract.py"
+  [t2-bb8]="src/t2bb8/t2contract.py"
+  [t2-3po]="src/t2_3po/t2contract.py"
+)
+
+cmd="${1:-check}"
+status=0
+for droid in t2-d2 t2-k2 t2-bb8 t2-3po; do
+  repo="$SRC/$droid"
+  if [[ ! -d "$repo" ]]; then
+    echo "skip   $droid: no checkout at $repo"
+    continue
+  fi
+  copy="$repo/${DEST[$droid]}"
+  case "$cmd" in
+    check)
+      if cmp -s "$REF" "$copy"; then
+        echo "ok     $droid"
+      else
+        echo "DIFFER $droid: $copy" >&2
+        status=1
+      fi
+      ;;
+    sync)
+      install -m 0644 "$REF" "$copy"
+      echo "synced $droid: $copy"
+      ;;
+    *)
+      echo "usage: $0 check|sync" >&2
+      exit 2
+      ;;
+  esac
+done
+exit "$status"

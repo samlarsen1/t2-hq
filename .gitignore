@@ -5,3 +5,4 @@
 var/
 __pycache__/
 *.db
+.pytest_cache/

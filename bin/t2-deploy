@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+# t2-deploy: test, release, deploy and inspect the T2 droids.
+#
+#   t2-deploy check    <droid>          run the droid's tests in $T2_SRC
+#   t2-deploy release  <droid> <vX.Y.Z> tag a clean, tested, pushed main and push the tag
+#   t2-deploy deploy   <droid> [tag]    check out a tag in $T2_APPS and install its systemd units
+#   t2-deploy undeploy <droid>          stop and remove the droid's units (keeps .env and var/)
+#   t2-deploy status                    deployed versions, timers and each droid's last run
+#
+# Droids: t2-d2 t2-k2 t2-bb8 t2-3po.
+#
+# Settings come from the environment or ~/.config/t2/deploy.conf (shell syntax):
+#   T2_SRC    development checkouts (default: the directory holding this t2-hq checkout)
+#   T2_APPS   deployed apps (required for deploy, undeploy and status)
+# For tests: T2_UNIT_DIR (default ~/.config/systemd/user) and T2_SYSTEMCTL (default systemctl).
+#
+# This script never creates, reads or edits a .env file. It only checks that one exists.
+set -euo pipefail
+
+HQ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/t2/deploy.conf"
+# shellcheck source=/dev/null
+[[ -f "$CONF" ]] && source "$CONF"
+T2_SRC="${T2_SRC:-$(dirname "$HQ")}"
+UNIT_DIR="${T2_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
+SYSTEMCTL="${T2_SYSTEMCTL:-systemctl}"
+DROIDS=(t2-d2 t2-k2 t2-bb8 t2-3po)
+CLEANUP=()
+trap 'rm -rf "${CLEANUP[@]}"' EXIT
+
+die() { echo "t2-deploy: $*" >&2; exit 1; }
+info() { echo "==> $*"; }
+
+usage() {
+  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+known_droid() {
+  local d
+  for d in "${DROIDS[@]}"; do [[ "$d" == "$1" ]] && return 0; done
+  die "unknown droid '$1' (expected one of: ${DROIDS[*]})"
+}
+
+# Unit name prefix for a droid: t2-d2 -> t2d2, t2-3po stays t2-3po.
+unit_prefix() {
+  case "$1" in
+    t2-3po) echo "t2-3po" ;;
+    *) echo "${1//-/}" ;;
+  esac
+}
+
+# The pyproject.toml whose version is the droid's release version.
+version_file() {
+  case "$1" in
+    t2-d2) echo "services/scheduler/pyproject.toml" ;;
+    *) echo "pyproject.toml" ;;
+  esac
+}
+
+# t2-d2 is a uv workspace; its console script lives in a member package.
+uv_args() {
+  case "$1" in
+    t2-d2) echo "--all-packages" ;;
+    *) echo "" ;;
+  esac
+}
+
+require_apps() {
+  [[ -n "${T2_APPS:-}" ]] || die "set T2_APPS (the deployed apps directory), in the environment or $CONF"
+}
+
+project_version() {
+  python3 - "$1" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    print(tomllib.load(handle)["project"]["version"])
+PY
+}
+
+cmd_check() {
+  local droid="$1" repo="$T2_SRC/$1"
+  [[ -d "$repo" ]] || die "no checkout at $repo"
+  info "testing $droid"
+  # shellcheck disable=SC2046
+  (cd "$repo" && uv run --frozen $(uv_args "$droid") pytest -q)
+}
+
+cmd_release() {
+  local droid="$1" tag="$2" repo="$T2_SRC/$1"
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "tag must look like v1.2.3"
+  [[ -d "$repo/.git" ]] || die "no checkout at $repo"
+  local branch
+  branch="$(git -C "$repo" symbolic-ref --short -q HEAD || true)"
+  [[ "$branch" == "main" ]] || die "$droid: check out main to release (on '${branch:-detached}')"
+  git -C "$repo" diff --quiet && git -C "$repo" diff --cached --quiet \
+    || die "$droid: main has uncommitted changes"
+  git -C "$repo" fetch -q origin main --tags
+  [[ "$(git -C "$repo" rev-parse HEAD)" == "$(git -C "$repo" rev-parse origin/main)" ]] \
+    || die "$droid: local main differs from origin/main; pull or push first"
+  git -C "$repo" rev-parse -q --verify "refs/tags/$tag" >/dev/null \
+    && die "$droid: tag $tag already exists"
+  local version
+  version="$(project_version "$repo/$(version_file "$droid")")"
+  [[ "v$version" == "$tag" ]] \
+    || die "$droid: $(version_file "$droid") says version $version, not ${tag#v}; bump it first"
+  cmd_check "$droid"
+  info "tagging $droid $tag"
+  git -C "$repo" tag -a "$tag" -m "$droid $tag"
+  git -C "$repo" push -q origin "refs/tags/$tag"
+  info "pushed $tag; deploy it with: $0 deploy $droid $tag"
+}
+
+latest_tag() {
+  git ls-remote --tags --refs "$1" 'v*' | awk '{sub("refs/tags/", "", $2); print $2}' \
+    | sort -V | tail -n 1
+}
+
+# Refuse to schedule a droid twice: system units (for example from t2-d2's install.md) and user
+# units would both run, and both would trade.
+check_no_system_units() {
+  local droid="$1" prefix units
+  prefix="$(unit_prefix "$droid")"
+  units="$($SYSTEMCTL list-unit-files --no-legend --no-pager "${prefix}*" 2>/dev/null | awk '{print $1}' || true)"
+  if [[ -n "$units" ]]; then
+    echo "t2-deploy: $droid already has system units, so deploying user units would run it twice:" >&2
+    sed 's/^/  /' <<<"$units" >&2
+    echo "Remove them first (see the droid's README, Deployment), then deploy again." >&2
+    exit 1
+  fi
+}
+
+installed_units() {
+  local prefix="$1"
+  [[ -d "$UNIT_DIR" ]] || return 0
+  find "$UNIT_DIR" -maxdepth 1 -type f \( -name "${prefix}*.service" -o -name "${prefix}*.timer" \) \
+    -printf '%f\n' | sort
+}
+
+render_units() {
+  local app="$1" out="$2" src="$1/deploy/systemd"
+  [[ -d "$src" ]] || die "$app has no deploy/systemd directory"
+  if [[ -f "$src/render.py" ]]; then
+    "$app/.venv/bin/python" "$src/render.py" "$out" "$app" >/dev/null
+  else
+    local f
+    for f in "$src"/*.service "$src"/*.timer; do
+      [[ -e "$f" ]] || continue
+      sed "s|@APP_DIR@|$app|g" "$f" >"$out/$(basename "$f")"
+    done
+  fi
+}
+
+cmd_deploy() {
+  local droid="$1" tag="${2:-}"
+  require_apps
+  local repo="$T2_SRC/$droid" app="$T2_APPS/$droid" prefix
+  prefix="$(unit_prefix "$droid")"
+  [[ -d "$repo/.git" ]] || die "no checkout at $repo (needed for the remote URL)"
+  local url
+  url="$(git -C "$repo" remote get-url origin)"
+  if [[ -z "$tag" ]]; then
+    tag="$(latest_tag "$url")"
+    [[ -n "$tag" ]] || die "$droid has no release tags; run: $0 release $droid vX.Y.Z"
+  fi
+
+  check_no_system_units "$droid"
+
+  info "deploying $droid $tag to $app"
+  mkdir -p "$app"
+  if [[ ! -d "$app/.git" ]]; then
+    git -C "$app" init -q
+    git -C "$app" remote add origin "$url"
+  elif [[ "$(git -C "$app" remote get-url origin)" != "$url" ]]; then
+    die "$app tracks $(git -C "$app" remote get-url origin), not $url"
+  fi
+  if git -C "$app" rev-parse -q --verify HEAD >/dev/null \
+    && [[ -n "$(git -C "$app" status --porcelain --untracked-files=no)" ]]; then
+    die "$app has local changes; deployed apps are never edited by hand"
+  fi
+  git -C "$app" fetch -q --force --tags origin
+  git -C "$app" rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "no tag $tag in $url"
+  git -C "$app" -c advice.detachedHead=false checkout -q --detach "refs/tags/$tag"
+
+  info "building the virtual environment"
+  # shellcheck disable=SC2046
+  (cd "$app" && uv sync -q --frozen --no-dev $(uv_args "$droid"))
+  mkdir -p "$app/var"
+
+  if [[ ! -e "$app/.env" ]]; then
+    die "$app/.env is missing: write it from $app/.env.example, then deploy again (no units installed)"
+  fi
+
+  local tmp
+  tmp="$(mktemp -d)"
+  CLEANUP+=("$tmp")
+  render_units "$app" "$tmp"
+  mkdir -p "$UNIT_DIR"
+
+  # Remove units this version no longer has, such as a session dropped from a schedule.
+  local unit
+  while read -r unit; do
+    [[ -n "$unit" && ! -e "$tmp/$unit" ]] || continue
+    info "removing stale unit $unit"
+    [[ "$unit" == *.timer ]] && $SYSTEMCTL --user disable --now "$unit" >/dev/null 2>&1 || true
+    rm -f "$UNIT_DIR/$unit"
+  done < <(installed_units "$prefix")
+
+  install -m 0644 "$tmp"/* "$UNIT_DIR/"
+  $SYSTEMCTL --user daemon-reload
+  local timer
+  for timer in "$tmp"/*.timer; do
+    [[ -e "$timer" ]] || continue
+    timer="$(basename "$timer")"
+    $SYSTEMCTL --user enable -q "$timer"
+    $SYSTEMCTL --user restart "$timer"
+  done
+
+  if command -v loginctl >/dev/null \
+    && [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || true)" != "yes" ]]; then
+    echo "warning: lingering is off, so the timers only run while you are logged in." >&2
+    echo "         Turn it on with: loginctl enable-linger $USER" >&2
+  fi
+  info "$droid $(git -C "$app" describe --tags) deployed"
+  $SYSTEMCTL --user list-timers --all --no-pager "${prefix}*" || true
+}
+
+cmd_undeploy() {
+  local droid="$1" prefix unit
+  prefix="$(unit_prefix "$droid")"
+  while read -r unit; do
+    [[ -n "$unit" ]] || continue
+    [[ "$unit" == *.timer ]] && { $SYSTEMCTL --user disable --now "$unit" >/dev/null 2>&1 || true; }
+    rm -f "$UNIT_DIR/$unit"
+    info "removed $unit"
+  done < <(installed_units "$prefix")
+  $SYSTEMCTL --user daemon-reload
+  info "$droid undeployed; its app directory, .env and var/ are untouched"
+}
+
+last_run() {
+  local runs="$1/var/runs" newest
+  [[ -d "$runs" ]] || { echo "no runs yet"; return; }
+  newest="$(find "$runs" -maxdepth 1 -name '*.json' -printf '%f\n' | sort | tail -n 1)"
+  [[ -n "$newest" ]] || { echo "no runs yet"; return; }
+  python3 - "$runs/$newest" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+print(f"{r['finished_at'][:16]} {r['command']}: {r['status']} - {r['summary']}")
+PY
+}
+
+cmd_status() {
+  require_apps
+  local droid app version
+  for droid in "${DROIDS[@]}"; do
+    app="$T2_APPS/$droid"
+    if [[ -d "$app/.git" ]] && git -C "$app" rev-parse -q --verify HEAD >/dev/null; then
+      version="$(git -C "$app" describe --tags --always)"
+      printf '%-7s %-14s %s\n' "$droid" "$version" "$(last_run "$app")"
+    else
+      printf '%-7s %s\n' "$droid" "not deployed"
+    fi
+  done
+  echo
+  $SYSTEMCTL --user list-timers --all --no-pager 't2*' || true
+  local system
+  system="$($SYSTEMCTL list-timers --all --no-pager --no-legend 't2*' 2>/dev/null || true)"
+  if [[ -n "$system" ]]; then
+    echo
+    echo "System timers (not managed by t2-deploy):"
+    echo "$system"
+  fi
+}
+
+[[ $# -ge 1 ]] || usage
+command="$1"
+shift
+case "$command" in
+  check) [[ $# -eq 1 ]] || usage; known_droid "$1"; cmd_check "$1" ;;
+  release) [[ $# -eq 2 ]] || usage; known_droid "$1"; cmd_release "$1" "$2" ;;
+  deploy) [[ $# -ge 1 && $# -le 2 ]] || usage; known_droid "$1"; cmd_deploy "$@" ;;
+  undeploy) [[ $# -eq 1 ]] || usage; known_droid "$1"; cmd_undeploy "$1" ;;
+  status) [[ $# -eq 0 ]] || usage; cmd_status ;;
+  -h | --help | help) usage ;;
+  *) usage ;;
+esac

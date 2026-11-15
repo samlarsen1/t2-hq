@@ -119,7 +119,7 @@ flowchart LR
         a5["t2-3po"]
     end
     dev -->|"push, tag"| gh
-    gh -->|"just deploy"| apps
+    gh -->|"t2-deploy deploy"| apps
     env["each app's .env<br/>written by the operator"] -.-> apps
 ```
 
