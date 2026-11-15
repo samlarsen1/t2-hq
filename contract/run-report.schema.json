@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "t2.run-report/1",
+  "title": "T2 droid run report",
+  "description": "Written by every droid run to var/runs/<UTC timestamp>-<command>.json. See CONTRACT.md.",
+  "type": "object",
+  "required": [
+    "schema", "droid", "version", "command", "argv", "started_at", "finished_at",
+    "duration_seconds", "dry_run", "status", "exit_code", "summary", "result", "errors"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "t2.run-report/1" },
+    "droid": { "type": "string", "pattern": "^t2-[a-z0-9]+$" },
+    "version": { "type": "string" },
+    "command": { "type": "string", "description": "What ran, e.g. \"session eu_morning\", \"harvest\", \"review\"." },
+    "argv": { "type": "array", "items": { "type": "string" } },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "duration_seconds": { "type": "number", "minimum": 0 },
+    "dry_run": { "type": ["boolean", "null"], "description": "null for droids that never trade." },
+    "status": { "enum": ["ok", "failed", "config_error", "skipped"] },
+    "exit_code": { "enum": [0, 1, 2, 3] },
+    "summary": { "type": "string", "description": "One line for a human." },
+    "result": { "type": "object", "description": "Droid-specific detail; documented in each droid's README." },
+    "errors": { "type": "array", "items": { "type": "string" } }
+  }
+}

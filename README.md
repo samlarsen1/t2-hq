@@ -25,6 +25,22 @@ for repo in t2-hq t2-d2 t2-k2 t2-bb8 t2-3po; do git clone "git@github.com:<owner
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): diagrams of how the pieces fit together.
 - [PLAN.md](PLAN.md): the design, the work to get there in order, and the decisions made so far.
+- [CONTRACT.md](CONTRACT.md): what every droid does at the edges: run reports, exit codes, locks.
+
+## Tools
+
+```bash
+export T2_APPS=~/apps/t2          # or set it in ~/.config/t2/deploy.conf
+
+bin/t2-deploy release t2-k2 v0.2.0   # tag a clean, tested main and push the tag
+bin/t2-deploy deploy t2-k2           # deploy the newest tag and install its systemd user units
+bin/t2-deploy status                 # versions, last runs and timers
+bin/t2-deploy undeploy t2-k2         # remove the units; keeps .env and var/
+
+bin/t2-contract check                # every droid's t2contract.py matches contract/
+```
+
+Run `bin/t2-deploy` with no arguments for the full usage.
 
 ## How the pieces relate
 
@@ -52,4 +68,5 @@ No script or agent in this system creates, reads or edits a `.env` file.
 
 ## Status
 
-Planning. This repo has no code yet; see the order of work in [PLAN.md](PLAN.md).
+Steps 1 and 2 of [PLAN.md](PLAN.md) are done: the repos are linked, every droid follows the
+contract, and `bin/t2-deploy` deploys them. Next is step 3, `t2-3po advise`.
