@@ -17,6 +17,8 @@ directory:
 - `../t2-k2`: gain harvester (places sells)
 - `../t2-bb8`: instrument harvester (metadata only)
 - `../t2-3po`: advisory council (read-only)
+- `../t2-r2`: trade ledger (read-only Trading212 key)
+- `../t2-core`: shared library (the price store); a library, not a droid
 
 ## Rules
 

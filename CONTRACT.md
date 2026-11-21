@@ -12,6 +12,7 @@ library only, vendored unchanged into each droid. Contract version: **1**.
 | `t2-k2` | `src/t2k2/t2contract.py` |
 | `t2-bb8` | `src/t2bb8/t2contract.py` |
 | `t2-3po` | `src/t2_3po/t2contract.py` |
+| `t2-r2` | `src/t2r2/t2contract.py` |
 
 To change it, edit the reference here, run its tests, then copy it into every droid and check:
 
@@ -61,7 +62,7 @@ Every run writes one JSON file, including runs that fail, skip or crash:
 }
 ```
 
-`dry_run` is `null` for droids that never trade (`t2-bb8`, `t2-3po`). `errors` never holds
+`dry_run` is `null` for droids that never trade (`t2-bb8`, `t2-3po`, `t2-r2`). `errors` never holds
 secrets: crashes are recorded by exception type only.
 
 ## Locks
@@ -75,7 +76,7 @@ it. A lock is released when its process exits, however it exits.
 - **Trading212 account lock, shared** (`t212_lock()`): rate limits apply per account, so droids
   take turns using it. A run waits up to `T2_T212_LOCK_TIMEOUT` seconds (default 600), then exits
   `3`. Droids hold it only while they use the account: `t2-d2` for a session, `t2-k2` for a
-  harvest, `t2-bb8` for its two requests, `t2-3po` while fetching the portfolio.
+  harvest, `t2-bb8` for its two requests, `t2-3po` while fetching the portfolio, `t2-r2` while reading order history.
 
 ## Deployment
 

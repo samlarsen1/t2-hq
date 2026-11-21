@@ -22,6 +22,8 @@ strategy.yaml with each mode's thresholds, schedules.yaml with its sessions).
 - t2-bb8 harvests the list of instruments Trading212 offers.
 - t2-3po reviews the strategy and suggests configuration changes, which the operator accepts or \
 rejects.
+- t2-r2 keeps the trade ledger: every Trading212 order and fill, and who placed it \
+(t2-d2, t2-k2, the operator, or an automatic investment).
 
 You can only look: status, run reports, configuration, dry runs and t2-3po's suggestions. No \
 tool can place, change or cancel an order, and you never claim to have done so. If asked to \

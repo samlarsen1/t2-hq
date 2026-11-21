@@ -12,13 +12,15 @@ through Telegram, that reports on the droids and passes on strategy advice from 
 | `t2-k2` | harvests gains from overbought holdings | places sell orders | weekly timer |
 | `t2-bb8` | harvests the Trading212 instrument list | metadata only | weekly timer |
 | `t2-3po` | advisory council: reviews theses, strategy and configuration | read-only | weekly timer |
+| `t2-r2` | trade ledger: every order and fill, and who placed it | read-only | daily timer |
+| `t2-core` | shared library: the price store | none | library, no timer |
 | **t2-hq** (this repo) | plan, contract, deploy tool, and the orchestrator: a read-only Telegram assistant | none | long-running service |
 
-All five repos live under the same GitHub owner. Clone them side by side:
+All seven repos live under the same GitHub owner. Clone them side by side:
 
 ```bash
 mkdir -p "$T2_SRC" && cd "$T2_SRC"
-for repo in t2-hq t2-d2 t2-k2 t2-bb8 t2-3po; do git clone "git@github.com:<owner>/$repo.git"; done
+for repo in t2-hq t2-d2 t2-k2 t2-bb8 t2-3po t2-r2 t2-core; do git clone "git@github.com:<owner>/$repo.git"; done
 ```
 
 ## Documents

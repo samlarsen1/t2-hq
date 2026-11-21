@@ -35,6 +35,8 @@ chat and every `.env` file.
 | `t2-k2` | gain harvester | places sells (`--execute`) | working; weekly timer described in its README |
 | `t2-bb8` | instrument harvester | metadata only | working; conservative with the rate limits |
 | `t2-3po` | advisory council | read-only (GET only) | `evaluate`, `review` and `advise` work; runs on Gemini's free tier or Ollama |
+| `t2-r2` | trade ledger | read-only (GET only) | ingest, attribution and CSV export (0.1.0, in review); Sheets sink and lot performance next |
+| `t2-core` | shared library | none | the price store (0.1.0, in review); no droid uses it yet |
 | `t2-hq` | hub and orchestrator | none | the contract (`CONTRACT.md`), `bin/t2-deploy`, `bin/t2-contract`, and the read-only orchestrator (`t2-hq run`, 0.1.0) |
 
 Things that matter for the design:
@@ -71,11 +73,11 @@ Things that matter for the design:
 ```
 $T2_SRC/                          development (git checkouts)
   t2-hq/                          hub: plan, architecture, orchestrator
-  t2-bb8/  t2-d2/  t2-k2/  t2-3po/
-  t2-core/                        later: shared library
+  t2-bb8/  t2-d2/  t2-k2/  t2-3po/  t2-r2/
+  t2-core/                        shared library (the price store so far)
 
 $T2_APPS/                         deployments (tagged releases, never edited by hand)
-  t2-bb8/  t2-d2/  t2-k2/  t2-3po/  t2-hq/
+  t2-bb8/  t2-d2/  t2-k2/  t2-3po/  t2-r2/  t2-hq/
     .env                          written by the operator from .env.example
     .venv/                        built by `uv sync --frozen --no-dev`
     var/                          runs/, data/, cache/ — untouched by deploys
@@ -135,6 +137,7 @@ systemd user timers on the host that runs the apps. Each repo ships its units un
 | `t2-k2` | Tuesday 22:00 Europe/London | no | **dry run** unless the operator adds `--execute` in a drop-in (see its README) |
 | `t2-bb8` | Sunday 06:00 Europe/London | yes | writes to `var/data` |
 | `t2-3po` | Sunday 07:00 Europe/London, `review` | yes | after `t2-bb8`; paced free-tier model calls |
+| `t2-r2` | daily 23:15 Europe/London, `ingest` | yes | after the US close; history paced to 6 pages a minute |
 | `t2-hq` | long-running service | n/a | `Restart=on-failure` (Part 5) |
 
 - **User units, not system units.** They install without `sudo` and run while the user is logged
@@ -347,11 +350,12 @@ The operator writes these; this is the recommended setup.
 
 - One `.env` per app, each written from that repo's `.env.example`. Don't share one file
   between apps: a droid should only be able to load the keys it needs.
-- Separate Trading212 keys by permission: metadata only for `t2-bb8`; read-only for `t2-3po`;
-  portfolio, orders read and orders execute for `t2-d2` and `t2-k2`.
+- Separate Trading212 keys by permission: metadata only for `t2-bb8`; read-only for `t2-3po`
+  and `t2-r2`; portfolio, orders read and orders execute for `t2-d2` and `t2-k2`. `t2-hq`
+  holds none.
 - Every repo keeps an `.env.example` listing all variables with placeholders.
 
-## Part 7: shared library (later)
+## Part 7: shared library *(price store in review: `t2-core` 0.1.0)*
 
 Once the contract is stable, extract `t2-core`:
 
@@ -369,7 +373,11 @@ Add to the list above:
   documented), the same Trading212 → Yahoo symbol mapping, and a local cache that the backtester
   in Part 9 can read years of history from.
 
-## Part 8: trade ledger *(planned)*
+## Part 8: trade ledger *(ingest in review: `t2-r2` 0.1.0)*
+
+The ledger is its own droid, **`t2-r2`**, not part of `t2-hq`: reading fills needs a
+Trading212 key, and the orchestrator holds none (Principle 5). `t2-r2` has a read-only key and
+its own timer; `t2-hq` only reads the ledger file.
 
 Run reports say what a droid *decided* and which orders it *placed*. They don't say whether a
 limit order filled, at what price, or what the position was worth later. The ledger is a single
@@ -379,7 +387,7 @@ local record of orders, fills and positions over time, which Part 9 measures aga
 
 ```
 droids ──► var/runs/*.json ──┐
-                             ├──► t2-hq ledger ingest ──► SQLite (var/ledger.db) ──► optional sinks
+                             ├──► t2r2 ingest ─────────► SQLite (var/ledger.db) ──► optional sinks
 Trading212 history (GET) ────┘                              source of truth            Google Sheets
                                                                                         CSV export
 ```
@@ -396,8 +404,8 @@ Trading212 history (GET) ────┘                              source of 
 - **Fills come from Trading212, not from run reports.** A read-only key (as `t2-3po` uses)
   reads the order and transaction history, so the ledger records what actually happened,
   including limit orders that never filled and orders the operator placed in the app.
-- **Ingest runs on a timer** after the trading sessions, and on demand from the orchestrator. It
-  takes the shared Trading212 lock for its history calls.
+- **Ingest runs on `t2-r2`'s daily timer** after the trading sessions. It takes the shared
+  Trading212 lock for its history calls.
 
 ### Tables (first draft)
 
@@ -417,11 +425,11 @@ Trading212 history (GET) ────┘                              source of 
 - **A sink is one-way and append-only.** It reads rows after its high-water mark in
   `sync_state`, writes them, then advances the mark. A failed sync retries the same rows next
   time; the ledger is never changed by a sink.
-- **Google Sheets sink** (optional): enabled only when its settings are present in `t2-hq`'s
+- **Google Sheets sink** (optional): enabled only when its settings are present in `t2-r2`'s
   `.env` (a service account key path and the spreadsheet id). One tab per table, batched appends
   to stay inside the Sheets API's per-minute write quota. The sheet is a view to read and chart;
   edits made in it are never read back.
-- **CSV export** (always available): `t2-hq ledger export` writes each table to CSV, for any
+- **CSV export** (always available): `t2r2 export` writes each table to CSV, for any
   spreadsheet or for a backup.
 - **Privacy:** the sheet is private to the operator, so the Sheets sink sends full rows,
   account values included. (This differs from the LLM calls, where only weights are sent.)
@@ -464,9 +472,9 @@ The Sheets sink writes a `lot_performance` tab, refreshed daily, ready to chart.
 
 ### Commands
 
-- `t2-hq ledger ingest [--since DATE]`, `t2-hq ledger sync [--sink sheets]`,
-  `t2-hq ledger export DIR`.
-- Agent tool `trades(ticker, since)`: read-only queries over the ledger, so questions such as
+- `t2r2 ingest [--full] [--no-t212]`, `t2r2 export DIR`, `t2r2 sources` *(in review)*;
+  `t2r2 sync [--sink sheets]` *(next)*.
+- `t2-hq` agent tool `trades(ticker, since)`: read-only queries over the ledger file, so questions such as
   "what has d2 bought in RIO this year and at what average?" are answered from the ledger rather
   than by reading run reports through the model.
 
@@ -530,10 +538,11 @@ default, through the usual reviewed pull request.
    `status`, `last_report`, `dry_run`, and the advice digest. *(done: `t2-hq` 0.1.0)*
 5. **Suggestion to pull request.** *(done: `t2-hq` 0.2.0)*
 6. **Documentation fixes.** Small; any time.
-7. **Shared library and price store** (Part 7).
-8. **Trade ledger** (Part 8): first, `t2-d2` records the Trading212 order id of each trade in
-   its run report; then SQLite ingest from run reports and Trading212 history, CSV export, and
-   the optional Google Sheets sink.
+7. **Shared library and price store** (Part 7). *(price store in review: `t2-core` 0.1.0; moving the
+   droids onto it, one pull request each, is still to do)*
+8. **Trade ledger** (Part 8), in `t2-r2`: `t2-d2` records each trade's Trading212 order id
+   *(in review)*; SQLite ingest, attribution and CSV export *(in review: `t2-r2` 0.1.0)*;
+   then the optional Google Sheets sink.
 9. **Forward returns** (Part 9, item 2): the first measurement, from the ledger.
 10. **Backtester** (Part 9, item 1), with its results passed to `t2-3po advise` as evidence.
 11. **Better signals** (Part 9, items 3–8), each as a `strategy.yaml` option, off by default,
