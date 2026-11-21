@@ -361,7 +361,163 @@ Once the contract is stable, extract `t2-core`:
 - run-report and suggestion models;
 - the lock-file helper.
 
-Droids depend on it by git tag. Do this last: it touches all four repos and changes no behaviour.
+Droids depend on it by git tag. It touches all four repos and changes no behaviour, but Parts 8
+and 9 rely on one price store and one set of Yahoo symbol mappings, so it now comes before them.
+Add to the list above:
+
+- **One price store** for every droid: the same closes (adjusted or not, decided once and
+  documented), the same Trading212 → Yahoo symbol mapping, and a local cache that the backtester
+  in Part 9 can read years of history from.
+
+## Part 8: trade ledger *(planned)*
+
+Run reports say what a droid *decided* and which orders it *placed*. They don't say whether a
+limit order filled, at what price, or what the position was worth later. The ledger is a single
+local record of orders, fills and positions over time, which Part 9 measures against.
+
+### Design
+
+```
+droids ──► var/runs/*.json ──┐
+                             ├──► t2-hq ledger ingest ──► SQLite (var/ledger.db) ──► optional sinks
+Trading212 history (GET) ────┘                              source of truth            Google Sheets
+                                                                                        CSV export
+```
+
+- **The droids don't change.** They keep writing run reports and never depend on the ledger, so
+  trading continues if the ledger or any sink is down (Principle 3).
+- **SQLite is the source of truth**, one file under `var/`. It needs no server, is in the Python
+  standard library, survives a reboot, and is easy to back up (`sqlite3 .backup`). WAL mode lets
+  readers work while ingest writes. Postgres is not needed while everything runs on one host; the
+  schema should be plain SQL so it can move to Postgres later if that changes.
+- **Ingest is idempotent.** Every row has a natural key (run id, Trading212 order id, fill id),
+  and ingest upserts by that key, so re-running it, or replaying all run reports, never
+  duplicates anything.
+- **Fills come from Trading212, not from run reports.** A read-only key (as `t2-3po` uses)
+  reads the order and transaction history, so the ledger records what actually happened,
+  including limit orders that never filled and orders the operator placed in the app.
+- **Ingest runs on a timer** after the trading sessions, and on demand from the orchestrator. It
+  takes the shared Trading212 lock for its history calls.
+
+### Tables (first draft)
+
+| Table | Holds |
+|---|---|
+| `runs` | one row per run report: droid, session, start, end, status, exit code |
+| `decisions` | one row per ticker evaluated: rule fired or skip reason, the figures behind it |
+| `orders` | every order placed: Trading212 id, `source` (`t2-d2`, `t2-k2`, `manual`), run id, side, type, limit, quantity, status |
+| `lot_performance` | per fill: source, returns at each horizon, shadow benchmark return, excess return |
+| `fills` | executed quantity, price, FX rate, fees, time |
+| `positions_daily` | end-of-day quantity, average price, value and weight per ticker |
+| `suggestions` | `t2-3po` suggestions and the operator's decision, with the pull request URL |
+| `sync_state` | the last row each sink has received |
+
+### Sinks: Google Sheets as one option, not a dependency
+
+- **A sink is one-way and append-only.** It reads rows after its high-water mark in
+  `sync_state`, writes them, then advances the mark. A failed sync retries the same rows next
+  time; the ledger is never changed by a sink.
+- **Google Sheets sink** (optional): enabled only when its settings are present in `t2-hq`'s
+  `.env` (a service account key path and the spreadsheet id). One tab per table, batched appends
+  to stay inside the Sheets API's per-minute write quota. The sheet is a view to read and chart;
+  edits made in it are never read back.
+- **CSV export** (always available): `t2-hq ledger export` writes each table to CSV, for any
+  spreadsheet or for a backup.
+- **Privacy:** the sheet is private to the operator, so the Sheets sink sends full rows,
+  account values included. (This differs from the LLM calls, where only weights are sent.)
+
+### Who placed each order
+
+Every order in the ledger has a `source`: `t2-d2`, `t2-k2` or `manual`.
+
+- **Trading212 marks where an order came from.** Pending orders carry `initiatedFrom` (`t2-k2`
+  already uses it to cancel only API-placed sells) and historical orders carry `executor`. API
+  orders are the droids'; anything placed from the app or the website is `manual`.
+- **The droid comes from its run report.** `t2-k2`'s run report already records each order's
+  Trading212 id. `t2-d2`'s `trades` don't yet: add the order id to each trade (a backwards
+  compatible change to its run report), so ingest matches every API order to the droid and the
+  session that placed it, and to the rule and figures behind it.
+- **Fallbacks:** an API order with no matching run report (placed before the id was recorded)
+  is attributed by side (buys to `t2-d2`, sells to `t2-k2`) and marked `inferred`.
+- **Lots, not positions.** The droids and the operator often hold the same stock, so a position
+  can't be split between them. Each fill is its own lot with its own source, which is what Part
+  9 measures.
+
+### Measuring operator trades against droid trades
+
+Per lot, from the ledger and the price store:
+
+- **Return to date** and at fixed horizons (5, 20, 60, 250 trading days), in GBP, FX and fees
+  included.
+- **Against a shadow benchmark:** the same money put into a broad index fund at the same time.
+  The difference is what the decision added, and it makes trades of different sizes and dates
+  comparable.
+- **Sells** are measured the other way: the return of the shares sold over the following
+  horizons. A negative figure means selling avoided a loss.
+- **Grouped by source** (and for the droids, by mode and session) to chart cumulative excess
+  return, hit rate and average excess return per trade for `manual`, `t2-d2` and `t2-k2`.
+- **Money-weighted return (XIRR) per source**, from each source's cash flows, plus the current
+  value of its remaining lots. For sold shares, lots are matched first in, first out within the
+  same source.
+
+The Sheets sink writes a `lot_performance` tab, refreshed daily, ready to chart.
+
+### Commands
+
+- `t2-hq ledger ingest [--since DATE]`, `t2-hq ledger sync [--sink sheets]`,
+  `t2-hq ledger export DIR`.
+- Agent tool `trades(ticker, since)`: read-only queries over the ledger, so questions such as
+  "what has d2 bought in RIO this year and at what average?" are answered from the ledger rather
+  than by reading run reports through the model.
+
+## Part 9: market analysis improvements *(planned)*
+
+Today the evidence behind `t2-3po`'s suggestions counts how often a rule *would fire* ("dip days
+by mode"). It doesn't measure whether firing made money. These features add that measurement
+first, then better signals. Each is computed in code and reaches `t2-3po` as evidence, keeping
+"code computes, the council judges". New rules land as options in `strategy.yaml`, off by
+default, through the usual reviewed pull request.
+
+1. **Backtesting with the droids' own rules.** `t2d2-algo` and `t2-k2`'s `strategy.py` are pure,
+   so they can be replayed over years of cached prices (Part 7's price store): d2 and k2
+   together, with Trading212's FX fee on non-GBP trades. Compare each mode, and the system as a
+   whole, against regular investment in a broad index fund from the watchlist. This answers
+   "is `mild` or `moderate` better for this stock?" with returns, not trigger counts.
+2. **Forward returns on every real trade.** From the ledger (Part 8), record each buy's and
+   sell's return 5, 20 and 60 trading days later, by droid, mode and ticker. Score `t2-3po`
+   suggestions the same way: did accepted suggestions do better than rejected ones? This is the
+   quickest feedback loop and needs only data the system already produces.
+3. **Volatility-scaled thresholds and sizing.** A fixed -3% daily dip is noise for a volatile
+   small cap and a real move for a utility. Add an option to express dips in standard deviations
+   of the stock's recent daily returns (or in ATR), and to size buys inversely to volatility, so
+   each position adds similar risk rather than similar pounds.
+4. **Dividends and earnings.** Check that every price module uses closes adjusted for dividends,
+   so an ex-dividend drop isn't read as a dip (this matters most for high-yield holdings). Add
+   earnings dates: skip buys in the session before results, and treat a gap after results
+   separately from an ordinary dip.
+5. **Exposure limits by theme.** Today's limits are per position. Holdings cluster by pillar of
+   the macro thesis (for example hydrogen and renewables, electrification, semiconductors), so a
+   sector sell-off can spend every trade in a run on the same bet. Tag each stock with its
+   pillar in `stocks.yaml`, add a maximum weight per pillar, and have `t2-3po` report pillar
+   weights and the correlation between holdings.
+6. **Market regime filter.** Scale the cash `t2-d2` deploys by the state of the broad market,
+   for example less when a broad index is below its 200-day SMA or volatility is high. This sits
+   above the per-stock rising-SMA gate.
+7. **Value-trap checks for `deep_value`.** "Near the 52-week low" also catches businesses that
+   are getting worse. Add code-computed quality figures (revenue trend, debt, cash burn) as
+   evidence, and optionally as a gate.
+8. **`t2-k2` as rebalancing.** In an ISA there is no capital gains tax, so trimming is a
+   rebalancing policy, not tax harvesting. Measure in the backtest whether trimming and later
+   buying back on a dip beats holding after FX fees, and how long trimmed cash sits idle before
+   `t2-d2` deploys it.
+
+## Documentation fixes
+
+- `t2-d2`'s README mode table doesn't match `config/strategy.yaml` (cash deployed per run and
+  position increases for `mild`, `moderate` and `aggressive`), and the "Schedules" section has a
+  leftover fragment of the old cron table. Generate the table from the YAML, or link to it.
+- Every droid README's repo table still lists `t2-hq` as "(planned)".
+- Add `.headroom/` to `t2-3po`'s `.gitignore`.
 
 ## Order of work
 
@@ -373,7 +529,15 @@ Droids depend on it by git tag. Do this last: it touches all four repos and chan
 4. **Orchestrator, read-only.** `t2-hq` with the LLM toggle, Telegram questions and answers,
    `status`, `last_report`, `dry_run`, and the advice digest. *(done: `t2-hq` 0.1.0)*
 5. **Suggestion to pull request.** *(done: `t2-hq` 0.2.0)*
-6. **Shared library.**
+6. **Documentation fixes.** Small; any time.
+7. **Shared library and price store** (Part 7).
+8. **Trade ledger** (Part 8): first, `t2-d2` records the Trading212 order id of each trade in
+   its run report; then SQLite ingest from run reports and Trading212 history, CSV export, and
+   the optional Google Sheets sink.
+9. **Forward returns** (Part 9, item 2): the first measurement, from the ledger.
+10. **Backtester** (Part 9, item 1), with its results passed to `t2-3po advise` as evidence.
+11. **Better signals** (Part 9, items 3–8), each as a `strategy.yaml` option, off by default,
+    justified by the backtest before it's turned on.
 
 ### Rolling out step 2
 
