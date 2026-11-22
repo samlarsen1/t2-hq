@@ -17,11 +17,12 @@ declare -A DEST=(
   [t2-k2]="src/t2k2/t2contract.py"
   [t2-bb8]="src/t2bb8/t2contract.py"
   [t2-3po]="src/t2_3po/t2contract.py"
+  [t2-r2]="src/t2r2/t2contract.py"
 )
 
 cmd="${1:-check}"
 status=0
-for droid in t2-d2 t2-k2 t2-bb8 t2-3po; do
+for droid in t2-d2 t2-k2 t2-bb8 t2-3po t2-r2; do
   repo="$SRC/$droid"
   if [[ ! -d "$repo" ]]; then
     echo "skip   $droid: no checkout at $repo"

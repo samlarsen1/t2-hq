@@ -25,7 +25,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-DroidName = Literal["t2-d2", "t2-k2", "t2-bb8", "t2-3po"]
+DroidName = Literal["t2-d2", "t2-k2", "t2-bb8", "t2-3po", "t2-r2"]
 DryRunDroid = Literal["t2-d2", "t2-k2"]
 
 # Arguments that would let a droid trade. No command this module builds may contain them.
@@ -49,6 +49,7 @@ DROIDS: dict[str, DroidSpec] = {
     "t2-k2": DroidSpec("t2-k2", "t2k2", ("config/strategy.yaml",)),
     "t2-bb8": DroidSpec("t2-bb8", "t2bb8", ()),
     "t2-3po": DroidSpec("t2-3po", "t2-3po", ()),
+    "t2-r2": DroidSpec("t2-r2", "t2r2", ()),
 }
 
 

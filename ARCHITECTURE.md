@@ -25,6 +25,7 @@ flowchart TB
     end
 
     bb8["t2-bb8<br/>instrument harvester"]
+    r2["t2-r2<br/>trade ledger (SQLite)"]
 
     timers[["systemd timers<br/>(host machine)"]]
     t212[("Trading212 API")]
@@ -46,11 +47,15 @@ flowchart TB
     timers --> k2
     timers --> bb8
     timers --> c3po
+    timers --> r2
 
     d2 -->|"buy orders"| t212
     k2 -->|"sell orders"| t212
     bb8 -->|"metadata"| t212
     c3po -->|"GET only"| t212
+    r2 -->|"order history, GET only"| t212
+    r2 -->|"reads run reports"| exec
+    agent -->|"reads the ledger"| r2
     d2 & k2 & c3po --> yahoo
 
     d2 -.->|"session summaries"| tg
@@ -96,6 +101,7 @@ sequenceDiagram
 | `t2-k2` | portfolio, place and cancel its own sells | its own reports | none | weekly |
 | `t2-bb8` | instrument metadata, at most one harvest per 20 hours | its data folder (local only, not in git) | none | weekly |
 | `t2-3po` | GET only | its reports and suggestions | Gemini Flash (free tier) or Ollama | daily review of 5 stocks; weekly advice |
+| `t2-r2` | GET only (order history) | its ledger (`var/ledger.db`) | none | daily |
 | `t2-hq` | none | pull requests, Telegram, its own state | Gemini Flash or Ollama | always on |
 
 ## Where things live
@@ -108,6 +114,8 @@ flowchart LR
         r3["t2-k2"]
         r4["t2-bb8"]
         r5["t2-3po"]
+        r6["t2-r2"]
+        r7["t2-core<br/>(library)"]
     end
     gh[("GitHub<br/>t2-* repos")]
     subgraph apps["$T2_APPS (deployed, tag-pinned)"]
@@ -116,6 +124,7 @@ flowchart LR
         a3["t2-k2"]
         a4["t2-bb8"]
         a5["t2-3po"]
+        a6["t2-r2"]
     end
     dev -->|"push, tag"| gh
     gh -->|"t2-deploy deploy"| apps

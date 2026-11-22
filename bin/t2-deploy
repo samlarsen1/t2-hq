@@ -7,7 +7,7 @@
 #   t2-deploy undeploy <droid>          stop and remove the droid's units (keeps .env and var/)
 #   t2-deploy status                    deployed versions, timers and each droid's last run
 #
-# Apps: the droids t2-d2 t2-k2 t2-bb8 t2-3po, and t2-hq itself (the orchestrator service).
+# Apps: the droids t2-d2 t2-k2 t2-bb8 t2-3po t2-r2, and t2-hq itself (the orchestrator service).
 #
 # Settings come from the environment or, failing that, ~/.config/t2/deploy.conf (shell syntax):
 #   T2_SRC    development checkouts (default: the directory holding this t2-hq checkout)
@@ -30,7 +30,7 @@ env_apps="${T2_APPS-}"
 T2_SRC="${T2_SRC:-$(dirname "$HQ")}"
 UNIT_DIR="${T2_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 SYSTEMCTL="${T2_SYSTEMCTL:-systemctl}"
-DROIDS=(t2-d2 t2-k2 t2-bb8 t2-3po t2-hq)
+DROIDS=(t2-d2 t2-k2 t2-bb8 t2-3po t2-r2 t2-hq)
 CLEANUP=()
 trap 'rm -rf "${CLEANUP[@]}"' EXIT
 
