@@ -11,7 +11,7 @@ through Telegram, that reports on the droids and passes on strategy advice from 
 | `t2-d2` | buys dips (DCA) across UK, US and EU stocks | places buy orders | systemd timers, one per trading session |
 | `t2-k2` | harvests gains from overbought holdings | places sell orders | weekly timer |
 | `t2-bb8` | harvests the Trading212 instrument list | metadata only | weekly timer |
-| `t2-3po` | advisory council: reviews theses, strategy and configuration | read-only | weekly timer |
+| `t2-3po` | advisory council: reviews theses, strategy and configuration | read-only | daily review, weekly advice |
 | **t2-hq** (this repo) | plan, contract, deploy tool, and the orchestrator: a read-only Telegram assistant | none | long-running service |
 
 All five repos live under the same GitHub owner. Clone them side by side:
