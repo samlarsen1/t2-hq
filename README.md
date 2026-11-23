@@ -55,8 +55,9 @@ place, change or cancel an order.
   `last_report`, `recent_runs`, `show_config`, `dry_run` and `suggestions`.
 - **Commands:** `/status` (versions, last runs, next timers), `/advice` (open suggestions),
   `/reset` (forget the conversation), `/help`.
-- **It tells you** when t2-3po's weekly advice is ready, one message per suggestion, and when any
-  droid run fails. Each suggestion has three buttons:
+- **It tells you** when t2-3po's weekly advice is ready, one message per suggestion; after each
+  t2-3po review, each stock's recommendation in at most five lines; and when any droid run fails.
+  Each suggestion has three buttons:
   - **📝 Open PR:** t2-hq makes the change in a pull request on the droid's repository, for you
     to review and merge, and records the suggestion as accepted.
   - **✅ Accept:** you've made the change yourself.

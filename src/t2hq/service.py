@@ -10,7 +10,14 @@ from typing import Any, Protocol
 
 from pydantic_ai.messages import ModelMessage
 
-from .digest import ACCEPT, OPEN_PR, advice_messages, failure_alert, parse_callback
+from .digest import (
+    ACCEPT,
+    OPEN_PR,
+    advice_messages,
+    failure_alert,
+    parse_callback,
+    review_messages,
+)
 from .droids import DROIDS, SUGGESTION_ID, DroidError, Droids
 from .prs import PullRequestError, PullRequests
 from .store import Store
@@ -234,6 +241,8 @@ class Orchestrator:
                     report = json.loads(path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     continue
+                for text in review_messages(report):
+                    await self.bot.send(self.chat_id, text)
                 if report.get("status") in FAILED:
                     await self.bot.send(self.chat_id, failure_alert(report))
                 self.store.mark_seen("report", key)

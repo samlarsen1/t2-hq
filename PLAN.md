@@ -250,8 +250,9 @@ with their source), the expected effect, the main risk, and a confidence level.
 - **Dry runs** set `T2_RUNS_DIR` to a temporary directory, so they don't count as real activity
   in t2-3po's advice, and switch the droid's Telegram off.
 - **Watcher:** every minute, sends a new advice run as a digest with Accept/Reject buttons (which
-  call `t2-3po suggestions accept|reject`) and alerts on any `failed` or `config_error` run
-  report. On the first start it marks what's already there as seen.
+  call `t2-3po suggestions accept|reject`), sends each stock in a new t2-3po `review` run report
+  as one message of at most five lines (`result.stocks[].summary`, built by t2-3po's code), and
+  alerts on any `failed` or `config_error` run report. On the first start it marks what's already there as seen.
 - **Conversation history:** the last six question-and-answer pairs per chat, without tool calls.
 - **Not yet:** missed-session detection (the `status` tool shows each timer's last and next run,
   so gaps are visible on request).
