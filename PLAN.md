@@ -136,7 +136,7 @@ systemd user timers on the host that runs the apps. Each repo ships its units un
 | `t2-d2` | one timer per enabled session in `config/schedules.yaml` | no | rendered by `deploy/systemd/render.py`; `DRY_RUN` in `.env` decides live or dry |
 | `t2-k2` | Tuesday 22:00 Europe/London | no | **dry run** unless the operator adds `--execute` in a drop-in (see its README) |
 | `t2-bb8` | Sunday 06:00 Europe/London | yes | writes to `var/data` |
-| `t2-3po` | daily 07:00 Europe/London, `review --batch 5`; Sunday 08:00, `advise` | yes | five stocks a day, least recently reviewed first, to stay inside the free tier's daily quota; after `t2-bb8` on Sundays |
+| `t2-3po` | daily 07:00 Europe/London, `review --batch 2`; Sunday 08:00, `advise` | yes | two stocks a day on a rolling basis, oldest review first, falling back through a list of Gemini models, to stay inside the free tier's daily quota; after `t2-bb8` on Sundays |
 | `t2-r2` | daily 23:15 Europe/London, `ingest` | yes | after the US close; history paced to 6 pages a minute |
 | `t2-hq` | long-running service | n/a | `Restart=on-failure` (Part 5) |
 
