@@ -1,6 +1,6 @@
 [project]
 name = "t2-hq"
-version = "0.2.0"
+version = "0.3.0"
 description = "Orchestrator for the T2 droids: Telegram, status, dry runs and strategy advice"
 readme = "README.md"
 requires-python = ">=3.12"
