@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic_ai.messages import ModelMessage
 
 from conftest import ADVICE, report
-from t2hq.digest import advice_messages, failure_alert, parse_callback
+from t2hq.digest import advice_messages, failure_alert, parse_callback, review_messages
 from t2hq.droids import Droids
 from t2hq.prs import PullRequest, PullRequestError
 from t2hq.service import Orchestrator
@@ -164,6 +165,62 @@ async def test_watch_sends_new_advice_once_and_alerts_on_failures(
     ]
     assert texts[2].startswith("⚠️ t2-d2 session eu_morning: failed")
     assert len(texts) == 3
+
+
+def _review(dry_run: bool = False, status: str = "ok") -> dict[str, Any]:
+    summary = "\n".join(
+        [
+            "CWR Ceres Power: HOLD at 2.5% (VALIDATED_WITH_RISKS, GROWTH)",
+            "Pillars: Electrification, Renewables",
+            "Strategy: mild, no change",
+            "Why: Strong net cash.",
+            "Risk: Partner delays.",
+        ]
+    )
+    data: dict[str, Any] = json.loads(report("t2-3po", "24", status, "1 of 2 stocks reviewed"))
+    data["command"] = "review"
+    data["dry_run"] = dry_run
+    data["result"] = {
+        "stocks": [
+            {"symbol": "CWR", "summary": summary},
+            {"symbol": "OLD", "status": "VALIDATED"},  # from a t2-3po without summaries
+        ],
+        "failed": ["TRIG"],
+    }
+    return data
+
+
+async def test_watch_sends_each_reviewed_stock_then_the_failure(
+    setup: tuple[Orchestrator, FakeBot, list[str]], apps: Path
+) -> None:
+    orchestrator, bot, _ = setup
+    orchestrator.seed_watch()
+    runs = apps / "t2-3po/var/runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "20261124T070700Z-review.json").write_text(json.dumps(_review(status="failed")))
+    await orchestrator.watch_once()
+    await orchestrator.watch_once()
+
+    texts = [message for message, _ in bot.sent]
+    assert len(texts) == 2
+    assert texts[0].splitlines()[:2] == [
+        "🔭 T2-3PO review",
+        "CWR Ceres Power: HOLD at 2.5% (VALIDATED_WITH_RISKS, GROWTH)",
+    ]
+    assert texts[1].startswith("⚠️ t2-3po review: failed")
+
+
+def test_review_messages_are_capped_and_only_for_reviews() -> None:
+    long = _review(dry_run=True)
+    long["result"] = {"stocks": [{"summary": "\n".join(["x" * 500] * 9)}]}
+    [message] = review_messages(long)
+    lines = message.splitlines()
+    assert lines[0] == "🔭 T2-3PO review (dry run)"
+    assert len(lines) == 1 + 5 and all(len(line) <= 200 for line in lines)
+    advise = _review()
+    advise["command"] = "advise"
+    assert review_messages(advise) == []
+    assert review_messages(json.loads(report("t2-k2", "17"))) == []
 
 
 def test_digest_and_alert_formatting() -> None:

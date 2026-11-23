@@ -1,4 +1,4 @@
-"""Messages the orchestrator sends on its own: the advice digest and failure alerts.
+"""Messages the orchestrator sends on its own: the advice digest, review summaries and alerts.
 
 They are formatted by code from structured data, not written by the model.
 """
@@ -65,6 +65,33 @@ def _title(s: dict[str, Any]) -> str:
     if kind == "remove_holding":
         return f"Move {target} to the watchlist"
     return f"Change {s.get('droid')} {s.get('target')} to {s.get('proposed')}"
+
+
+SUMMARY_LINES = 5
+SUMMARY_LINE_CHARS = 200
+
+
+def review_messages(report: dict[str, Any]) -> list[str]:
+    """One message per stock in a t2-3po ``review`` run report: its recommendation in five lines.
+
+    The lines come from t2-3po's ``result.stocks[].summary``; they are cut to five lines of 200
+    characters here too, so a long summary can't flood the chat. Stocks without one are skipped.
+    """
+    if report.get("droid") != "t2-3po" or report.get("command") != "review":
+        return []
+    result = report.get("result")
+    stocks = result.get("stocks") if isinstance(result, dict) else None
+    if not isinstance(stocks, list):
+        return []
+    label = "T2-3PO review (dry run)" if report.get("dry_run") else "T2-3PO review"
+    messages = []
+    for entry in stocks:
+        summary = entry.get("summary") if isinstance(entry, dict) else None
+        if not isinstance(summary, str) or not summary.strip():
+            continue
+        lines = [line[:SUMMARY_LINE_CHARS] for line in summary.strip().splitlines()]
+        messages.append(f"🔭 {label}\n" + "\n".join(lines[:SUMMARY_LINES]))
+    return messages
 
 
 def failure_alert(report: dict[str, Any]) -> str:
